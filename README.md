@@ -1,7 +1,8 @@
 # OLCI cross-comparison with SWOT and S6
 
 Tools for finding spatio-temporal intersections between Sentinel-3 OLCI,
-SWOT KaRIn, and, in a later phase, the Sentinel-6 nadir altimeter. The project
+SWOT KaRIn, and, in a later phase, Sentinel-6 microwave-radiometer
+observations. The project
 uses compact Orbit Revolution Files (ORFs) for acquisition screening, so large
 Level-2 science products are downloaded only after useful matchups have been
 identified.
@@ -30,14 +31,13 @@ its native grid and only the common geographic vignette is applied.
 
 ### Planned work: OLCI and Sentinel-6
 
-The Sentinel-6 component will add nadir-altimeter intersections. It will focus
-on the wet-tropospheric correction derived from the onboard microwave
-radiometer, especially its high-frequency spatial variability. The objective
-is to determine whether fine atmospheric-water-vapour features, such as moist
-fronts visible in OLCI TCWV, can be detected in or compared with the Sentinel-6
-radiometer correction.
+The Sentinel-6 component will focus exclusively on the wet-tropospheric
+correction derived from the onboard microwave radiometer, especially its
+high-frequency spatial variability. The objective is to determine whether fine
+atmospheric-water-vapour features, such as moist fronts visible in OLCI TCWV,
+can be detected in or compared with the Sentinel-6 radiometer correction.
 
-Sentinel-6 intersection geometry and scientific analysis are not implemented
+Sentinel-6 radiometer colocation and scientific analysis are not implemented
 yet.
 
 ## Current field-of-view model
@@ -278,7 +278,7 @@ space-time prefilter behaviour, and polar-latitude rejection.
   from product information.
 - TCWV-to-wet-path-delay conversion is not implemented yet and will require an
   explicit physical model and ancillary atmospheric information.
-- Sentinel-6 geometry, product download, radiometer analysis, and comparison
+- Sentinel-6 radiometer colocation, product download, analysis, and comparison
   workflows remain on the roadmap.
 
 ## Roadmap
@@ -287,7 +287,7 @@ space-time prefilter behaviour, and polar-latitude rejection.
 2. Add a combined TCWV / corrected SSH / Sigma0 comparison figure.
 3. Quantify spatial correlations and scale-dependent coherence.
 4. Add Sentinel-3B ORF support to the same catalogue workflow.
-5. Add Sentinel-6 nadir intersections and radiometer wet-troposphere analysis.
+5. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
 6. Add a documented TCWV-to-wet-path-delay model with uncertainty estimates.
 
 ## Data policy and attribution
