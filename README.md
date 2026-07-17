@@ -18,7 +18,8 @@ space, time, latitude, surface area, ocean fraction, and along-track length.
 
 For selected matchups, the scientific comparison is visual:
 
-- map OLCI Total Column Water Vapour (TCWV/COWa) at native OLCI resolution;
+- map OLCI Total Column Water Vapour (TCWV/COWa) and its equivalent wet path
+  delay at native OLCI resolution;
 - map fully corrected SWOT KaRIn sea-surface height (`ssh_karin_2`);
 - map SWOT KaRIn normalized radar cross section (`sig0_karin_2`), converted to
   decibels for display;
@@ -313,21 +314,39 @@ The subset contains native SWOT pixels, geolocation, time, corrected SSH,
 SSHA, Sigma0, quality flags, surface classification, and an exact
 `in_vignette` mask. A one-feature GeoPackage and CSV are written beside it.
 
-## 6. Plot corrected SWOT SSH and Sigma0
+## 6. Plot corrected SWOT SSH, Sigma0, and OLCI wet path delay
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
   --subset "data\validation_case\swot_subset.nc" `
+  --olci "data\validation_case\olci\TCWV_with_wet_delay.nc" `
   --vignette "data\validation_case\swot_subset.gpkg" `
   --land "data\natural_earth\ne_10m_land.zip" `
   --title "coastal validation case" `
-  --output "outputs\swot_ssh_sig0.png"
+  --output "outputs\olci_swot_ssh_sig0_wet_delay.png"
 ```
 
-The plot uses native open-ocean SWOT pixels. `bad_not_usable` and
-`bad_outside_of_range` pixels are excluded. Corrected SSH is displayed after
-subtracting the vignette median, which changes only the reference level and
-preserves spatial structures. Sigma0 is converted from linear units to dB.
+The figure contains three side-by-side panels in this order:
+
+1. corrected SWOT `ssh_karin_2` minus its vignette median;
+2. SWOT `sig0_karin_2` in decibels;
+3. OLCI `wet_tropo_path_delay` minus its vignette median.
+
+All figure titles, colour bars, annotations, and processing comments are in
+English. Corrected SSH and OLCI wet-delay anomalies are both expressed in
+metres and use the same symmetric colour limits, allowing their amplitudes to
+be compared directly. Sigma0 uses an independent percentile-based dB scale.
+Each instrument remains on its native grid; no spatial resampling or resolution
+matching is performed.
+
+The SWOT panels use native open-ocean pixels. `bad_not_usable` and
+`bad_outside_of_range` pixels are excluded. The OLCI panel uses finite wet-delay
+pixels over ocean whose centres fall inside the exact vignette polygon; land,
+invalid, or cloudy TCWV pixels remain absent. OLCI longitude and latitude are
+automatically detected for common 1-D or 2-D coordinate layouts. Non-standard
+names can be provided with `--olci-longitude-variable` and
+`--olci-latitude-variable`.
+
 The plotted `sig0_karin_2` uses a model-based atmospheric attenuation
 correction. Rain, cloud liquid water, and water-vapour-related attenuation can
 leave atmospheric signatures when that model does not resolve the observed
@@ -356,7 +375,8 @@ quality information for the vignette.
 
 The tests cover ORF parsing and interpolation, tangent geometry handling,
 space-time prefilter behaviour, polar-latitude rejection, the TCWV-to-wet-delay
-physics, and NetCDF conversion.
+physics, NetCDF conversion, OLCI coordinate broadcasting, and generation of the
+three-panel comparison figure.
 
 ## Current limitations
 
@@ -377,10 +397,9 @@ physics, and NetCDF conversion.
 ## Roadmap
 
 1. Add OLCI TCWV subsetting, quality masks, and clear-sky coverage metrics.
-2. Add a combined TCWV / corrected SSH / Sigma0 comparison figure.
-3. Quantify spatial correlations and scale-dependent coherence.
-4. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
-5. Add pixel-wise meteorological `Tm` generation and propagated uncertainty
+2. Quantify spatial correlations and scale-dependent coherence.
+3. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
+4. Add pixel-wise meteorological `Tm` generation and propagated uncertainty
    estimates for the wet-delay conversion.
 
 ## Data policy and attribution
