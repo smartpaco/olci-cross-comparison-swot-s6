@@ -32,6 +32,7 @@ dependencies = [
 dev = ["pytest>=8,<9"]
 
 [project.scripts]
+find-s3-swot = "satmatch.cli:main"
 find-s3a-swot = "satmatch.cli:main"
 
 [tool.setuptools.packages.find]

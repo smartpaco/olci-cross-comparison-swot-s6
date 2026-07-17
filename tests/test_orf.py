@@ -1,9 +1,12 @@
 from pathlib import Path
 
-from satmatch.orf import OrbitInterpolator, pass_windows, read_orf
-from satmatch.geometry import _polygon_parts
-from shapely import LineString
 import pandas as pd
+import pytest
+from shapely import LineString
+
+from satmatch.cli import resolve_s3_platform
+from satmatch.geometry import _polygon_parts
+from satmatch.orf import OrbitInterpolator, pass_windows, read_orf
 
 
 def test_read_and_interpolate_small_orf(tmp_path: Path):
@@ -37,3 +40,17 @@ def test_read_and_interpolate_small_orf(tmp_path: Path):
 
 def test_tangent_intersection_has_no_surface():
     assert _polygon_parts(LineString([(0.0, 0.0), (1.0, 1.0)])) == []
+
+
+def test_resolve_sentinel3_platform_from_orf_name() -> None:
+    assert resolve_s3_platform("S3A_ORF_example") == "S3A"
+    assert resolve_s3_platform("path/to/S3B_ORF_example") == "S3B"
+
+
+def test_explicit_sentinel3_platform_for_generic_orf_name() -> None:
+    assert resolve_s3_platform("orbit_table.txt", "S3B") == "S3B"
+
+
+def test_reject_platform_orf_mismatch() -> None:
+    with pytest.raises(ValueError, match="does not match"):
+        resolve_s3_platform("S3A_ORF_example", "S3B")

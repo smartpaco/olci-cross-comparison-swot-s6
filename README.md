@@ -11,8 +11,9 @@ identified.
 
 ### Current work: OLCI and SWOT
 
-The first component finds intersections between the Sentinel-3A OLCI field of
-view and the two SWOT KaRIn swaths. Candidate intersections are constrained in
+The first component finds intersections between the Sentinel-3A or Sentinel-3B
+OLCI field of view and the two SWOT KaRIn swaths. The platform is selected for
+each run from the command line. Candidate intersections are constrained in
 space, time, latitude, surface area, ocean fraction, and along-track length.
 
 For selected matchups, the scientific comparison is visual:
@@ -42,8 +43,8 @@ yet.
 
 ## Current field-of-view model
 
-- **Sentinel-3A OLCI:** nominal 1,270 km swath, represented as 635 km on each
-  side of nadir.
+- **Sentinel-3A or Sentinel-3B OLCI:** nominal 1,270 km swath, represented as
+  635 km on each side of nadir.
 - **SWOT KaRIn:** two separate swaths, 10 to 60 km from nadir on the left and
   right sides.
 - **Time separation:** 30 minutes by default.
@@ -76,7 +77,7 @@ search, and the final vignette check. On a ten-day test window, this rejected
 ## Repository layout
 
 ```text
-orbits/                 Included Sentinel-3A and SWOT ORFs
+orbits/                 Included Sentinel-3A, Sentinel-3B, and SWOT ORFs
 src/satmatch/           ORF parsing, geometry, ocean mask, and matchup engine
 scripts/                Product discovery, download, subsetting, and plotting
 tests/                  Unit tests for ORFs, geometry, and prefilters
@@ -137,8 +138,11 @@ still responsible for checking staged files before every commit.
 
 The ORFs required by this example are included in `orbits/`.
 
+### Sentinel-3A
+
 ```powershell
-.\.venv\Scripts\find-s3a-swot.exe `
+.\.venv\Scripts\find-s3-swot.exe `
+  --s3-platform S3A `
   --s3-orf "orbits\S3A_ORF_AXXCNE20260717_075300_20160302_154759_20260801_081654" `
   --swot-orf "orbits\SWOT_ORF_AXXCNE20260717_103800_20230720_200750_20260801_081502" `
   --start 2026-06-16 `
@@ -154,6 +158,36 @@ The ORFs required by this example are included in `orbits/`.
   --land-resolution 50m `
   --output "outputs\s3a_swot_20260616_20260626.gpkg"
 ```
+
+### Sentinel-3B
+
+Use the same command with the S3B platform and ORF:
+
+```powershell
+.\.venv\Scripts\find-s3-swot.exe `
+  --s3-platform S3B `
+  --s3-orf "orbits\S3B_ORF_AXXCNE20260717_080700_20181123_213005_20260801_080330" `
+  --swot-orf "orbits\SWOT_ORF_AXXCNE20260717_103800_20230720_200750_20260801_081502" `
+  --start 2026-06-16 `
+  --end 2026-06-26 `
+  --dt-minutes 30 `
+  --sample-seconds 30 `
+  --prefilter-seconds 60 `
+  --max-along-track-km 50 `
+  --min-area-km2 400 `
+  --min-ocean-percent 50 `
+  --min-latitude -66 `
+  --max-latitude 66 `
+  --land-resolution 50m `
+  --output "outputs\s3b_swot_20260616_20260626.gpkg"
+```
+
+`--s3-platform` may be omitted when the ORF filename contains `S3A` or `S3B`.
+The command validates an explicitly selected platform against the filename to
+prevent accidental use of the wrong orbit table. Output vignette identifiers
+are prefixed with `S3A_SWOT_` or `S3B_SWOT_`, and the catalogue contains an
+explicit `s3_platform` field. The former `find-s3a-swot` command remains as a
+backward-compatible alias, but `find-s3-swot` is recommended.
 
 The command writes:
 
@@ -269,7 +303,8 @@ space-time prefilter behaviour, and polar-latitude rejection.
 
 ## Current limitations
 
-- Only Sentinel-3A OLCI versus SWOT is implemented in the matchup engine.
+- Sentinel-3A and Sentinel-3B use the same nominal OLCI field-of-view model;
+  platform-specific differences beyond their ORFs are not represented.
 - The OLCI swath is currently a symmetric nominal buffer rather than an exact
   instrument edge model.
 - ORF interpolation is designed for acquisition screening, not precise pixel
@@ -286,9 +321,8 @@ space-time prefilter behaviour, and polar-latitude rejection.
 1. Add OLCI TCWV subsetting, quality masks, and clear-sky coverage metrics.
 2. Add a combined TCWV / corrected SSH / Sigma0 comparison figure.
 3. Quantify spatial correlations and scale-dependent coherence.
-4. Add Sentinel-3B ORF support to the same catalogue workflow.
-5. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
-6. Add a documented TCWV-to-wet-path-delay model with uncertainty estimates.
+4. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
+5. Add a documented TCWV-to-wet-path-delay model with uncertainty estimates.
 
 ## Data policy and attribution
 

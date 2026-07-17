@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -10,17 +11,47 @@ from .matchups import find_matchups
 from .ocean import ensure_land_mask
 
 
+S3_PLATFORM_PATTERN = re.compile(r"(?:^|[^A-Z0-9])(S3[AB])(?:[^A-Z0-9]|$)")
+
+
+def resolve_s3_platform(orf_path: str | Path, requested: str | None = None) -> str:
+    """Resolve S3A/S3B from the CLI option and, when possible, the ORF name."""
+    match = S3_PLATFORM_PATTERN.search(Path(orf_path).name.upper())
+    inferred = match.group(1) if match else None
+    platform = requested.upper() if requested else inferred
+    if platform is None:
+        raise ValueError(
+            "Unable to infer the Sentinel-3 platform from the ORF filename; "
+            "use --s3-platform S3A or --s3-platform S3B"
+        )
+    if inferred is not None and requested is not None and inferred != platform:
+        raise ValueError(
+            f"--s3-platform {platform} does not match ORF filename {Path(orf_path).name}"
+        )
+    return platform
+
+
 def utc_time(value: str | None):
     return None if value is None else pd.Timestamp(value, tz="UTC")
 
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
-        description="Intersections sur océan entre les FOV S3A/OLCI et SWOT/KaRIn à partir des ORF."
+        description="Intersections sur océan entre les FOV S3A ou S3B OLCI et SWOT/KaRIn à partir des ORF."
     )
-    result.add_argument("--s3-orf", required=True, help="Fichier ORF Sentinel-3A")
+    result.add_argument(
+        "--s3-orf", required=True, help="Fichier ORF Sentinel-3A ou Sentinel-3B"
+    )
+    result.add_argument(
+        "--s3-platform",
+        choices=("S3A", "S3B"),
+        help="Plateforme OLCI; déduite du nom du fichier ORF si cette option est omise",
+    )
     result.add_argument("--swot-orf", required=True, help="Fichier ORF SWOT")
-    result.add_argument("--output", default="outputs/s3a_swot.gpkg", help="GeoPackage de sortie")
+    result.add_argument(
+        "--output",
+        help="GeoPackage de sortie (défaut: outputs/s3a_swot.gpkg ou outputs/s3b_swot.gpkg)",
+    )
     result.add_argument("--start", help="Début UTC inclus, ex. 2023-07-20")
     result.add_argument("--end", help="Fin UTC incluse, ex. 2023-07-22")
     result.add_argument("--dt-minutes", type=float, default=30.0)
@@ -54,10 +85,18 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = parser().parse_args()
+    argument_parser = parser()
+    args = argument_parser.parse_args()
+    try:
+        s3_platform = resolve_s3_platform(args.s3_orf, args.s3_platform)
+    except ValueError as error:
+        argument_parser.error(str(error))
     if not (-90.0 <= args.min_latitude < args.max_latitude <= 90.0):
-        raise SystemExit("Les limites doivent vérifier -90 <= min-latitude < max-latitude <= 90")
-    output = Path(args.output)
+        raise SystemExit(
+            "Les limites doivent vérifier "
+            "-90 <= min-latitude < max-latitude <= 90"
+        )
+    output = Path(args.output or f"outputs/{s3_platform.lower()}_swot.gpkg")
     output.parent.mkdir(parents=True, exist_ok=True)
     land_mask = ensure_land_mask(args.land_mask, args.land_resolution)
     options = GeometryOptions(
@@ -88,7 +127,12 @@ def main() -> None:
     matches["prefilter_seconds"] = args.prefilter_seconds
     matches["min_latitude"] = args.min_latitude
     matches["max_latitude"] = args.max_latitude
-    matches.insert(0, "vignette_id", [f"S3A_SWOT_{idx:08d}" for idx in range(1, len(matches) + 1)])
+    matches.insert(0, "s3_platform", s3_platform)
+    matches.insert(
+        0,
+        "vignette_id",
+        [f"{s3_platform}_SWOT_{idx:08d}" for idx in range(1, len(matches) + 1)],
+    )
     matches.to_file(output, layer="vignettes", driver="GPKG")
     matches.drop(columns="geometry").to_csv(output.with_suffix(".csv"), index=False)
     print(f"{len(matches)} vignettes écrites dans {output} et {output.with_suffix('.csv')}")
