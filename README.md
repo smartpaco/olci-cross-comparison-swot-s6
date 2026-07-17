@@ -24,8 +24,12 @@ For selected matchups, the scientific comparison is visual:
   decibels for display;
 - inspect whether coherent structures in OLCI TCWV are still visible as wet
   tropospheric path-delay residuals in corrected SWOT SSH;
-- use Sigma0 to identify structures more plausibly associated with surface,
-  ice, rain, land contamination, or coastal effects.
+- interpret Sigma0 jointly with TCWV and SSH. Sigma0 responds to sea-surface
+  backscatter, but the Ka-band echo is also modified by atmospheric attenuation
+  and precipitation. Small-scale atmospheric structures that are absent from
+  the model-based correction can therefore appear in `sig0_karin_2`; they must
+  not automatically be attributed to the surface. Ice, rain, land
+  contamination, and coastal effects remain alternative explanations.
 
 No artificial resolution matching is performed. Each sensor is displayed on
 its native grid and only the common geographic vignette is applied.
@@ -249,7 +253,53 @@ Download the matching SWOT L2 LR Unsmoothed granule from NASA Earthdata:
 The download script skips existing non-empty files and writes via `.part`
 files before atomically renaming completed downloads.
 
-## 4. Extract the exact SWOT vignette
+## 4. Convert OLCI TCWV to wet tropospheric path delay
+
+`IWV_W` is the integrated water-vapour column in kg m⁻². The conversion
+implemented here produces the positive, one-way zenith wet propagation delay
+in metres:
+
+```text
+ZWD = (A + B / Tm) * TCWV
+A = -2.95077e-5 m / (kg m-2)
+B =  1.73276 m K / (kg m-2)
+```
+
+`Tm` is the water-vapour-weighted mean atmospheric temperature. This is
+Eq. A15 of [Bennartz et al. (2017)](https://doi.org/10.5194/amt-10-1387-2017).
+The OLCI `IWV_W` field and its kg m⁻² units are documented in the
+[Copernicus Sentinel-3 OLCI L2 data description](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Data/S3OLCIL2.html).
+
+Run the conversion after downloading the selected `TCWV.nc` file:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\convert_olci_tcwv.py `
+  --input "data\validation_case\olci\TCWV.nc" `
+  --output "data\validation_case\olci\TCWV_with_wet_delay.nc" `
+  --tcwv-variable IWV_W `
+  --mean-temperature-k 270
+```
+
+The variable name is detected automatically among `IWV_W`, `TCWV`, and common
+case variants when `--tcwv-variable` is omitted. The output is a copy of the
+input NetCDF with a float32 `wet_tropo_path_delay` variable in metres. Existing
+scale factors and fill values are decoded by xarray before conversion.
+
+With the default `Tm = 270 K`, the conversion factor is
+6.388 mm of wet delay per kg m⁻² of TCWV, close to the commonly quoted
+6.4 mm. This constant-temperature mode is intended for initial pattern and
+amplitude comparisons. For a more accurate absolute amplitude, first add a
+pixel-wise water-vapour-weighted `Tm` field from a meteorological profile, then
+use `--tm-variable <variable-name>`. A fixed `Tm` changes the multiplicative
+amplitude but does not create new small-scale spatial patterns.
+
+The generated delay is positive excess path length, not a signed SSH
+correction. Compare demeaned or detrended amplitudes in metres. If an excess
+wet delay is left uncorrected in the radar range, its expected SSH residual has
+the opposite sign; the exact sign comparison must follow the convention of the
+SWOT correction variable being analysed.
+
+## 5. Extract the exact SWOT vignette
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\subset_swot_validation.py `
@@ -263,7 +313,7 @@ The subset contains native SWOT pixels, geolocation, time, corrected SSH,
 SSHA, Sigma0, quality flags, surface classification, and an exact
 `in_vignette` mask. A one-feature GeoPackage and CSV are written beside it.
 
-## 5. Plot corrected SWOT SSH and Sigma0
+## 6. Plot corrected SWOT SSH and Sigma0
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
@@ -278,6 +328,12 @@ The plot uses native open-ocean SWOT pixels. `bad_not_usable` and
 `bad_outside_of_range` pixels are excluded. Corrected SSH is displayed after
 subtracting the vignette median, which changes only the reference level and
 preserves spatial structures. Sigma0 is converted from linear units to dB.
+The plotted `sig0_karin_2` uses a model-based atmospheric attenuation
+correction. Rain, cloud liquid water, and water-vapour-related attenuation can
+leave atmospheric signatures when that model does not resolve the observed
+feature. See the
+[SWOT L2 LR SSH product description](https://www.aviso.altimetry.fr/fileadmin/documents/data/tools/D-56407_SWOT_Product_Description_L2_LR_SSH_20220902_RevA.pdf)
+for the distinction between `sig0_karin` and `sig0_karin_2`.
 
 ## OLCI clear-sky coverage
 
@@ -299,7 +355,8 @@ quality information for the vignette.
 ```
 
 The tests cover ORF parsing and interpolation, tangent geometry handling,
-space-time prefilter behaviour, and polar-latitude rejection.
+space-time prefilter behaviour, polar-latitude rejection, the TCWV-to-wet-delay
+physics, and NetCDF conversion.
 
 ## Current limitations
 
@@ -311,8 +368,9 @@ space-time prefilter behaviour, and polar-latitude rejection.
   geolocation.
 - Cloud-free OLCI coverage is not available from ORFs and must be determined
   from product information.
-- TCWV-to-wet-path-delay conversion is not implemented yet and will require an
-  explicit physical model and ancillary atmospheric information.
+- The default TCWV-to-wet-delay conversion uses a constant `Tm = 270 K`.
+  Pixel-wise meteorological profiles are required for the best absolute
+  accuracy and for a spatially varying conversion factor.
 - Sentinel-6 radiometer colocation, product download, analysis, and comparison
   workflows remain on the roadmap.
 
@@ -322,7 +380,8 @@ space-time prefilter behaviour, and polar-latitude rejection.
 2. Add a combined TCWV / corrected SSH / Sigma0 comparison figure.
 3. Quantify spatial correlations and scale-dependent coherence.
 4. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
-5. Add a documented TCWV-to-wet-path-delay model with uncertainty estimates.
+5. Add pixel-wise meteorological `Tm` generation and propagated uncertainty
+   estimates for the wet-delay conversion.
 
 ## Data policy and attribution
 
