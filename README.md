@@ -352,8 +352,8 @@ The figure contains four side-by-side panels in this order:
 
 1. corrected SWOT `ssh_karin_2` minus its vignette median;
 2. SWOT `sig0_karin_2` in decibels;
-3. OLCI `wet_tropo_path_delay` minus its vignette median.
-4. SWOT model wet path delay minus its vignette median.
+3. SWOT model wet path delay minus its vignette median;
+4. OLCI `wet_tropo_path_delay` minus its vignette median.
 
 The Expert variable `model_wet_tropo_cor` is a negative correction in metres.
 The plotting code negates it to obtain a positive equivalent vertical wet path
@@ -374,7 +374,9 @@ remains on its native grid; no spatial resampling or resolution matching is
 performed. The coarser SWOT Expert wet-delay field is rendered as filled native
 curvilinear grid cells rather than point markers. This makes the panel read as
 an image while preserving the model product's native spatial resolution and
-without interpolating it onto the 250 m KaRIn grid.
+without interpolating it onto the 250 m KaRIn grid. The sign of
+`cross_track_distance` is used to retain only the same left or right SWOT swath
+recorded in the SSH/Sigma0 subset.
 
 The SWOT panels use native open-ocean pixels. `bad_not_usable` and
 `bad_outside_of_range` pixels are excluded. The OLCI panel uses finite wet-delay

@@ -75,7 +75,10 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
                 ),
             ),
         },
-        attrs={"source_product": "SWOT_L2_LR_SSH_051_533_example.nc"},
+        attrs={
+            "source_product": "SWOT_L2_LR_SSH_051_533_example.nc",
+            "swot_side": "left",
+        },
     ).to_netcdf(swot_path)
 
     xr.Dataset(
@@ -103,6 +106,10 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
                 + np.linspace(0.03, -0.03, lines * pixels).reshape(
                     lines, pixels
                 ),
+            ),
+            "cross_track_distance": (
+                ("line", "pixel"),
+                np.tile(np.array([-20_000.0, -10_000.0, 10_000.0]), (lines, 1)),
             ),
             "ssh_karin_2_qual": (("line", "pixel"), quality),
             "ancillary_surface_classification_flag": (
@@ -149,6 +156,7 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
     assert output_path.stat().st_size > 20_000
     assert "OLCI_VALID_PIXELS=16" in result.stdout
     assert "OLCI_CLEAR_SKY_PERCENT=100.000000" in result.stdout
-    assert "SWOT_MODEL_VALID_PIXELS=12" in result.stdout
+    assert "SWOT_MODEL_SIDE=left" in result.stdout
+    assert "SWOT_MODEL_VALID_PIXELS=8" in result.stdout
     assert "SHARED_ANOMALY_LIMIT_M=" in result.stdout
     assert "WET_DELAY_PLOT_LIMIT_M=" in result.stdout

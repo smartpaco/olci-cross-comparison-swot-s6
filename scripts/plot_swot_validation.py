@@ -190,6 +190,11 @@ def main() -> None:
         )
         time_start = np.datetime_as_string(dataset["time"].values[0], unit="s")
         time_end = np.datetime_as_string(dataset["time"].values[-1], unit="s")
+        swot_side = str(dataset.attrs.get("swot_side", "")).casefold()
+        if swot_side not in {"left", "right"}:
+            argument_parser.error(
+                "The SWOT subset must identify its swot_side as left or right"
+            )
         source = dataset.attrs.get("source_product", "")
         marker = re.search(r"_(\d{3})_(\d{3})_", source)
         source_label = (
@@ -251,6 +256,7 @@ def main() -> None:
             args.swot_model_variable,
             "longitude",
             "latitude",
+            "cross_track_distance",
             "ssh_karin_2_qual",
             "ancillary_surface_classification_flag",
         )
@@ -265,6 +271,9 @@ def main() -> None:
         model_correction = np.asarray(
             dataset[args.swot_model_variable].values, dtype=float
         )
+        model_cross_track = np.asarray(
+            dataset["cross_track_distance"].values, dtype=float
+        )
         model_flags = np.nan_to_num(
             dataset["ssh_karin_2_qual"].values, nan=2**32 - 1
         ).astype(np.uint32)
@@ -273,8 +282,12 @@ def main() -> None:
         )
 
     model_inside = contains_xy(polygon, model_lon, model_lat)
+    model_selected_side = (
+        model_cross_track < 0.0 if swot_side == "left" else model_cross_track > 0.0
+    )
     model_mask = (
         model_inside
+        & model_selected_side
         & (model_surface == 0)
         & np.isfinite(model_lon)
         & np.isfinite(model_lat)
@@ -358,18 +371,6 @@ def main() -> None:
         },
         {
             "axis": axes[2],
-            "x": olci_x,
-            "y": olci_y,
-            "mask": olci_mask,
-            "values": olci_anomaly,
-            "cmap": cmocean.cm.balance,
-            "norm": olci_norm,
-            "title": f"OLCI wet path delay − median ({olci_reference:.3f} m)",
-            "unit": "Wet path-delay anomaly (m)",
-            "size": 5.0,
-        },
-        {
-            "axis": axes[3],
             "x": model_x,
             "y": model_y,
             "mask": model_mask,
@@ -383,6 +384,18 @@ def main() -> None:
             "unit": "Model wet path-delay anomaly (m)",
             "size": 4.0,
             "render": "mesh",
+        },
+        {
+            "axis": axes[3],
+            "x": olci_x,
+            "y": olci_y,
+            "mask": olci_mask,
+            "values": olci_anomaly,
+            "cmap": cmocean.cm.balance,
+            "norm": olci_norm,
+            "title": f"OLCI wet path delay − median ({olci_reference:.3f} m)",
+            "unit": "Wet path-delay anomaly (m)",
+            "size": 5.0,
         },
     ]
 
@@ -462,6 +475,7 @@ def main() -> None:
         f"SSH pixels retained. OLCI delay source: {olci_source_variable}; "
         f"{olci_conversion_method}. "
         "SWOT model delay = −model_wet_tropo_cor. "
+        f"Model side: {swot_side}. "
         f"{source_label}",
         ha="center",
         va="bottom",
@@ -486,6 +500,7 @@ def main() -> None:
     print(f"SIG0_DB_LIMITS={sig0_low:.6f},{sig0_high:.6f}")
     print(f"OLCI_VALID_PIXELS={int(olci_mask.sum())}")
     print(f"OLCI_CLEAR_SKY_PERCENT={olci_clear_sky_percent:.6f}")
+    print(f"SWOT_MODEL_SIDE={swot_side}")
     print(f"SWOT_MODEL_VALID_PIXELS={int(model_mask.sum())}")
 
 
