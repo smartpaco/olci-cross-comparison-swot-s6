@@ -85,3 +85,54 @@ def test_conversion_script_writes_wet_delay(tmp_path: Path) -> None:
         assert converted["wet_tropo_path_delay"].values[0] == pytest.approx(
             [0.0638812, 0.1277624], abs=1.0e-6
         )
+
+
+def test_conversion_supports_wfr_geolocation_and_wqsf(tmp_path: Path) -> None:
+    input_path = tmp_path / "iwv.nc"
+    geolocation_path = tmp_path / "geo_coordinates.nc"
+    quality_path = tmp_path / "wqsf.nc"
+    output_path = tmp_path / "IWV_with_wet_delay.nc"
+    xr.Dataset(
+        {"IWV": (("rows", "columns"), np.full((2, 2), 10.0, dtype=np.float32))}
+    ).to_netcdf(input_path)
+    xr.Dataset(
+        {
+            "longitude": (("rows", "columns"), [[-1.0, 0.0], [-1.0, 0.0]]),
+            "latitude": (("rows", "columns"), [[40.0, 40.0], [41.0, 41.0]]),
+        }
+    ).to_netcdf(geolocation_path)
+    meanings = "INVALID LAND CLOUD CLOUD_AMBIGUOUS CLOUD_MARGIN SNOW_ICE WV_FAIL"
+    masks = np.array([1, 2, 4, 8, 16, 32, 64], dtype=np.uint64)
+    xr.Dataset(
+        {
+            "WQSF": (
+                ("rows", "columns"),
+                np.array([[0, 4], [0, 0]], dtype=np.uint64),
+                {"flag_meanings": meanings, "flag_masks": masks},
+            )
+        }
+    ).to_netcdf(quality_path)
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).parents[1] / "scripts" / "convert_olci_tcwv.py"),
+            "--input",
+            str(input_path),
+            "--geolocation",
+            str(geolocation_path),
+            "--quality-file",
+            str(quality_path),
+            "--output",
+            str(output_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    with xr.open_dataset(output_path) as converted:
+        delay = converted["wet_tropo_path_delay"].values
+        assert np.isfinite(delay).sum() == 3
+        assert np.isnan(delay[0, 1])
+        assert converted["wet_tropo_path_delay"].attrs["source_variable"] == "IWV"

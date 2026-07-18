@@ -18,6 +18,15 @@ from satmatch.tropo import (
 TCWV_CANDIDATES = ("IWV_W", "TCWV", "tcwv", "IWV", "iwv")
 LONGITUDE_CANDIDATES = ("longitude", "lon")
 LATITUDE_CANDIDATES = ("latitude", "lat")
+WQSF_INVALID_FLAGS = (
+    "INVALID",
+    "LAND",
+    "CLOUD",
+    "CLOUD_AMBIGUOUS",
+    "CLOUD_MARGIN",
+    "SNOW_ICE",
+    "WV_FAIL",
+)
 
 
 def find_tcwv_variable(dataset: xr.Dataset, requested: str | None = None) -> str:
@@ -81,7 +90,9 @@ def load_vignette_subset(
     column_slice = slice(max(0, int(columns.min()) - 2), int(columns.max()) + 3)
     keep = [tcwv_name, longitude_name, latitude_name]
     keep.extend(
-        name for name in ("quality_flags", "qi", "unc") if name in source
+        name
+        for name in ("quality_flags", "qi", "unc", "WQSF", "IWV_unc")
+        if name in source
     )
     subset = source[keep].isel(
         {row_dimension: row_slice, column_dimension: column_slice}
@@ -108,6 +119,20 @@ def parser() -> argparse.ArgumentParser:
         description="Convert OLCI TCWV/IWV_W to positive one-way zenith wet path delay."
     )
     result.add_argument("--input", required=True, help="Input OLCI TCWV NetCDF file")
+    result.add_argument(
+        "--geolocation",
+        help=(
+            "Optional separate OLCI geolocation NetCDF, for example "
+            "geo_coordinates.nc from OL_2_WFR"
+        ),
+    )
+    result.add_argument(
+        "--quality-file",
+        help=(
+            "Optional separate OLCI quality NetCDF containing WQSF; cloud, "
+            "invalid, land, snow/ice, and WV-failure pixels are masked"
+        ),
+    )
     result.add_argument("--output", required=True, help="Output NetCDF file")
     result.add_argument(
         "--vignette",
@@ -115,7 +140,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument(
         "--tcwv-variable",
-        help="TCWV variable name; automatically detects IWV_W or TCWV when omitted",
+        help="TCWV variable name; automatically detects IWV_W, TCWV, or IWV when omitted",
     )
     result.add_argument(
         "--mean-temperature-k",
@@ -147,18 +172,52 @@ def main() -> None:
         argument_parser.error(f"Output already exists: {output_path}; use --overwrite")
 
     try:
-        with xr.open_dataset(input_path, mask_and_scale=True) as source:
+        sources = [xr.open_dataset(input_path, mask_and_scale=True)]
+        try:
+            if args.geolocation:
+                sources.append(
+                    xr.open_dataset(args.geolocation, mask_and_scale=True)
+                )
+            if args.quality_file:
+                sources.append(
+                    xr.open_dataset(args.quality_file, mask_and_scale=False)
+                )
+            source = xr.merge(sources, compat="override", combine_attrs="override")
             tcwv_name = find_tcwv_variable(source, args.tcwv_variable)
             dataset = (
                 load_vignette_subset(source, tcwv_name, args.vignette)
                 if args.vignette
                 else source.load()
             )
+        finally:
+            for opened in sources:
+                opened.close()
     except ValueError as error:
         argument_parser.error(str(error))
     valid_tcwv = dataset[tcwv_name] >= 0.0
     if "qi" in dataset:
         valid_tcwv &= dataset["qi"] > 0
+    if "WQSF" in dataset:
+        quality = dataset["WQSF"]
+        meanings = str(quality.attrs.get("flag_meanings", "")).split()
+        masks = np.asarray(quality.attrs.get("flag_masks", []), dtype=np.uint64)
+        if len(meanings) != len(masks):
+            argument_parser.error(
+                "WQSF flag_meanings and flag_masks metadata are inconsistent"
+            )
+        by_name = dict(zip(meanings, masks, strict=True))
+        missing_flags = [name for name in WQSF_INVALID_FLAGS if name not in by_name]
+        if missing_flags:
+            argument_parser.error(
+                "WQSF is missing required flags: " + ", ".join(missing_flags)
+            )
+        quality_values = np.asarray(quality.values, dtype=np.uint64)
+        invalid_quality = np.zeros(quality_values.shape, dtype=bool)
+        for name in WQSF_INVALID_FLAGS:
+            invalid_quality |= (quality_values & by_name[name]) != 0
+        valid_tcwv &= ~xr.DataArray(
+            invalid_quality, dims=quality.dims, coords=quality.coords
+        )
     tcwv = dataset[tcwv_name].where(valid_tcwv)
 
     if args.tm_variable:

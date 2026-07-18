@@ -219,6 +219,11 @@ Natural Earth land masks are downloaded automatically on first use.
 The current dedicated OLCI COWa/TCWV collection is
 `EO:EUM:DAT:1121` (`OL_2_TCWVFR`).
 
+For dates before that collection begins, the historical standard OLCI
+water-full-resolution collection `EO:EUM:DAT:0407` (`OL_2_WFR`) provides the
+integrated water-vapour field as `IWV` in `iwv.nc`. Its geolocation and quality
+flags are stored separately in `geo_coordinates.nc` and `wqsf.nc`.
+
 ```powershell
 .\.venv\Scripts\python.exe scripts\query_eumetsat_products.py `
   --credentials "C:\path\outside\the\repository\credentials.txt" `
@@ -300,11 +305,28 @@ Run the conversion after downloading the selected `TCWV.nc` file:
   --mean-temperature-k 270
 ```
 
-The variable name is detected automatically among `IWV_W`, `TCWV`, `tcwv`, and
-common case variants when `--tcwv-variable` is omitted. With `--vignette`, the
+For a historical `OL_2_WFR` product, pass the companion geolocation and quality
+files explicitly:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\convert_olci_tcwv.py `
+  --input "data\validation_case\olci\iwv.nc" `
+  --geolocation "data\validation_case\olci\geo_coordinates.nc" `
+  --quality-file "data\validation_case\olci\wqsf.nc" `
+  --output "data\validation_case\olci\IWV_with_wet_delay.nc" `
+  --vignette "data\validation_case\vignette.gpkg" `
+  --mean-temperature-k 270
+```
+
+The variable name is detected automatically among `IWV_W`, `IWV`, `TCWV`,
+`tcwv`, and common case variants when `--tcwv-variable` is omitted. With
+`--vignette`, the
 converter first locates the relevant OLCI rows and columns and loads only TCWV,
 longitude, latitude, uncertainty, and quality information. This avoids loading
 the full 4091 x 4865 product into memory. Pixels with `qi = 0` are excluded.
+For `OL_2_WFR`, the converter also excludes `INVALID`, `LAND`, `CLOUD`,
+`CLOUD_AMBIGUOUS`, `CLOUD_MARGIN`, `SNOW_ICE`, and `WV_FAIL` pixels from the
+`WQSF` bit field.
 The compact output contains a float32 `wet_tropo_path_delay` variable in metres
 and an exact `in_vignette` mask. Existing scale factors and fill values are
 decoded by xarray before conversion.
@@ -434,9 +456,10 @@ is available, clear-sky coverage should be reported at least as:
 valid TCWV pixels inside the vignette / OLCI pixels inside the vignette
 ```
 
-and separately over ocean. A product browse image can provide a rapid
-qualitative indication, but an exact percentage requires TCWV validity and
-quality information for the vignette.
+and separately over ocean. The converted output preserves an exact
+`in_vignette` mask and masks the relevant TCWV/IWV quality flags, so this
+percentage can be computed without resampling the sensor grid. A product browse
+image remains useful only for rapid qualitative screening.
 
 ## Testing
 
@@ -457,8 +480,8 @@ generation of the four-panel comparison figure.
   instrument edge model.
 - ORF interpolation is designed for acquisition screening, not precise pixel
   geolocation.
-- Cloud-free OLCI coverage is not available from ORFs and must be determined
-  from product information.
+- Cloud-free OLCI coverage is not available from ORFs and is determined from
+  the downloaded selected product's TCWV/IWV validity and quality flags.
 - The default TCWV-to-wet-delay conversion uses a constant `Tm = 270 K`.
   Pixel-wise meteorological profiles are required for the best absolute
   accuracy and for a spatially varying conversion factor.
@@ -467,10 +490,9 @@ generation of the four-panel comparison figure.
 
 ## Roadmap
 
-1. Add OLCI TCWV subsetting, quality masks, and clear-sky coverage metrics.
-2. Quantify spatial correlations and scale-dependent coherence.
-3. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
-4. Add pixel-wise meteorological `Tm` generation and propagated uncertainty
+1. Quantify spatial correlations and scale-dependent coherence.
+2. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
+3. Add pixel-wise meteorological `Tm` generation and propagated uncertainty
    estimates for the wet-delay conversion.
 
 ## Data policy and attribution
