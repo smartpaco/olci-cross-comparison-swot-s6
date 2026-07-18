@@ -98,16 +98,20 @@ def main() -> None:
     selected.to_file(output.with_suffix(".gpkg"), layer="vignette", driver="GPKG")
     selected.drop(columns="geometry").to_csv(output.with_suffix(".csv"), index=False)
 
-    valid_ssh = (
+    valid_ssha = (
         inside
-        & np.isfinite(subset["ssh_karin_2"].values)
+        & np.isfinite(subset["ssha_karin_2"].values)
         & np.isfinite(subset["height_cor_xover"].values)
+        & np.isfinite(subset["ssha_karin_2_qual"].values)
         & (subset["height_cor_xover_qual"].values == 0)
     )
     valid_sig0 = inside & np.isfinite(subset["sig0_karin_2"].values)
     print(f"SWOT_SUBSET={output}")
     print(f"SHAPE={inside.shape} INSIDE={int(inside.sum())}")
-    print(f"SSH_VALID={int(valid_ssh.sum())} SIG0_VALID={int(valid_sig0.sum())}")
+    print(
+        f"SSHA_XCAL_VALID={int(valid_ssha.sum())} "
+        f"SIG0_VALID={int(valid_sig0.sum())}"
+    )
 
 
 if __name__ == "__main__":

@@ -90,7 +90,7 @@ def require_valid(mask: np.ndarray, label: str) -> None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description=(
-            "Plot colocated corrected SWOT SSH, SWOT Sigma0, and OLCI wet path delay."
+            "Plot colocated XCAL-corrected SWOT SSHA, SWOT Sigma0, and OLCI wet path delay."
         )
     )
     result.add_argument("--subset", required=True, help="SWOT vignette NetCDF")
@@ -121,7 +121,7 @@ def parser() -> argparse.ArgumentParser:
         choices=("shared", "independent"),
         default="shared",
         help=(
-            "shared uses one metre scale for SSH and both wet delays; "
+            "shared uses one metre scale for SSHA and both wet delays; "
             "independent enhances patterns with separate robust scales"
         ),
     )
@@ -176,7 +176,7 @@ def main() -> None:
             argument_parser.error(
                 "SWOT subset is missing XCAL fields: " + ", ".join(missing_xcal)
             )
-        ssh_native = np.asarray(dataset["ssh_karin_2"].values, dtype=float)
+        ssha_native = np.asarray(dataset["ssha_karin_2"].values, dtype=float)
         height_cor_xover = np.asarray(
             dataset["height_cor_xover"].values, dtype=float
         )
@@ -184,34 +184,34 @@ def main() -> None:
             dataset["height_cor_xover_qual"].values, nan=255
         ).astype(np.uint8)
         xcal_good = np.isfinite(height_cor_xover) & (xcal_quality == 0)
-        ssh = ssh_native + height_cor_xover
+        ssha = ssha_native + height_cor_xover
         sig0 = np.asarray(dataset["sig0_karin_2"].values, dtype=float)
-        ssh_mask = (
-            usable_mask(dataset, "ssh_karin_2", "ssh_karin_2_qual")
+        ssha_mask = (
+            usable_mask(dataset, "ssha_karin_2", "ssha_karin_2_qual")
             & xcal_good
         )
         sig0_mask = usable_mask(
             dataset, "sig0_karin_2", "sig0_karin_2_qual"
         ) & (sig0 > 0.0)
-        require_valid(ssh_mask, "SWOT SSH")
+        require_valid(ssha_mask, "SWOT SSHA")
         require_valid(sig0_mask, "SWOT Sigma0")
 
-        ssh_reference = float(np.nanmedian(ssh[ssh_mask]))
-        ssh_anomaly = ssh - ssh_reference
-        xcal_reference = float(np.nanmedian(height_cor_xover[ssh_mask]))
+        ssha_reference = float(np.nanmedian(ssha[ssha_mask]))
+        ssha_anomaly = ssha - ssha_reference
+        xcal_reference = float(np.nanmedian(height_cor_xover[ssha_mask]))
         xcal_anomaly = height_cor_xover - xcal_reference
         xcal_limit = float(
-            np.nanpercentile(np.abs(xcal_anomaly[ssh_mask]), 98.0)
+            np.nanpercentile(np.abs(xcal_anomaly[ssha_mask]), 98.0)
         )
         sig0_db = np.full(sig0.shape, np.nan, dtype=float)
         sig0_db[sig0_mask] = 10.0 * np.log10(sig0[sig0_mask])
         sig0_low, sig0_high = np.nanpercentile(sig0_db[sig0_mask], [2.0, 98.0])
 
-        ssh_flags = np.nan_to_num(
-            dataset["ssh_karin_2_qual"].values, nan=2**32 - 1
+        ssha_flags = np.nan_to_num(
+            dataset["ssha_karin_2_qual"].values, nan=2**32 - 1
         ).astype(np.uint32)
         degraded = int(
-            np.sum(ssh_mask & ((ssh_flags & np.uint32(1 << 30)) != 0))
+            np.sum(ssha_mask & ((ssha_flags & np.uint32(1 << 30)) != 0))
         )
         time_start = np.datetime_as_string(dataset["time"].values[0], unit="s")
         time_end = np.datetime_as_string(dataset["time"].values[-1], unit="s")
@@ -329,27 +329,27 @@ def main() -> None:
     model_reference = float(np.nanmedian(model_delay[model_mask]))
     model_anomaly = model_delay - model_reference
 
-    ssh_limit = float(np.nanpercentile(np.abs(ssh_anomaly[ssh_mask]), 98.0))
+    ssha_limit = float(np.nanpercentile(np.abs(ssha_anomaly[ssha_mask]), 98.0))
     olci_limit = float(np.nanpercentile(np.abs(olci_anomaly[olci_mask]), 98.0))
     model_limit = float(
         np.nanpercentile(np.abs(model_anomaly[model_mask]), 98.0)
     )
-    shared_limit = max(ssh_limit, olci_limit, model_limit, 1.0e-6)
+    shared_limit = max(ssha_limit, olci_limit, model_limit, 1.0e-6)
     shared_norm = TwoSlopeNorm(
         vmin=-shared_limit, vcenter=0.0, vmax=shared_limit
     )
     if args.scale_mode == "shared":
-        ssh_norm = olci_norm = model_norm = shared_norm
+        ssha_norm = olci_norm = model_norm = shared_norm
         wet_delay_plot_limit = shared_limit
         scale_description = (
-            "SSH, OLCI delay, and SWOT model-delay anomalies share "
+            "SSHA, OLCI delay, and SWOT model-delay anomalies share "
             f"±{shared_limit:.3f} m colour limits."
         )
     else:
-        ssh_norm = TwoSlopeNorm(
-            vmin=-max(ssh_limit, 1.0e-6),
+        ssha_norm = TwoSlopeNorm(
+            vmin=-max(ssha_limit, 1.0e-6),
             vcenter=0.0,
-            vmax=max(ssh_limit, 1.0e-6),
+            vmax=max(ssha_limit, 1.0e-6),
         )
         olci_norm = TwoSlopeNorm(
             vmin=-max(olci_limit, 1.0e-6),
@@ -361,7 +361,7 @@ def main() -> None:
         model_norm = olci_norm
         wet_delay_plot_limit = olci_limit
         scale_description = (
-            "SSH uses an independent symmetric 98th-percentile scale; OLCI "
+            "SSHA uses an independent symmetric 98th-percentile scale; OLCI "
             "and SWOT model wet delays share the OLCI 98th-percentile scale."
         )
 
@@ -374,15 +374,15 @@ def main() -> None:
             "axis": axes[0],
             "x": swot_x,
             "y": swot_y,
-            "mask": ssh_mask,
-            "values": ssh_anomaly,
+            "mask": ssha_mask,
+            "values": ssha_anomaly,
             "cmap": cmocean.cm.balance,
-            "norm": ssh_norm,
+            "norm": ssha_norm,
             "title": (
-                "XCAL-corrected SWOT SSH − median "
-                f"({ssh_reference:.3f} m)"
+                "XCAL-corrected SWOT SSHA − median "
+                f"({ssha_reference:.3f} m)"
             ),
-            "unit": "SSH anomaly (m)",
+            "unit": "SSHA anomaly (m)",
             "size": 4.0,
         },
         {
@@ -483,7 +483,7 @@ def main() -> None:
     axes[0].set_ylabel("Local northing (km)")
 
     pixel_summary = (
-        f"valid pixels: SSH {int(ssh_mask.sum()):,}, "
+        f"valid pixels: SSHA {int(ssha_mask.sum()):,}, "
         f"Sigma0 {int(sig0_mask.sum()):,}, OLCI delay {int(olci_mask.sum()):,}, "
         f"SWOT model delay {int(model_mask.sum()):,}; "
         f"OLCI clear-sky coverage {olci_clear_sky_percent:.1f}%"
@@ -500,7 +500,7 @@ def main() -> None:
         f"Native sensor grids; no spatial resampling. {scale_description} "
         "Sigma0 can contain both surface and atmospheric signatures.\n"
         f"Vignette and open-ocean SWOT quality masks applied; {degraded} degraded "
-        "SSH pixels retained. SSH = ssh_karin_2 + height_cor_xover; only good "
+        "SSHA pixels retained. SSHA = ssha_karin_2 + height_cor_xover; only good "
         f"XCAL retained (median {xcal_reference:.3f} m). OLCI delay source: "
         f"{olci_source_variable}; "
         f"{olci_conversion_method}. "
@@ -518,14 +518,14 @@ def main() -> None:
     figure.savefig(output, dpi=190, bbox_inches="tight", facecolor="white")
     plt.close(figure)
     print(f"PLOT={output}")
-    print(f"SSH_REFERENCE_M={ssh_reference:.6f}")
+    print(f"SSHA_REFERENCE_M={ssha_reference:.6f}")
     print(f"XCAL_REFERENCE_M={xcal_reference:.6f}")
     print(f"XCAL_ANOMALY_LIMIT_M={xcal_limit:.6f}")
-    print(f"XCAL_GOOD_PIXELS={int(np.sum(ssh_mask))}")
+    print(f"XCAL_GOOD_PIXELS={int(np.sum(ssha_mask))}")
     print(f"OLCI_DELAY_REFERENCE_M={olci_reference:.6f}")
     print(f"SWOT_MODEL_DELAY_REFERENCE_M={model_reference:.6f}")
     print(f"SHARED_ANOMALY_LIMIT_M={shared_limit:.6f}")
-    print(f"SSH_ANOMALY_LIMIT_M={ssh_limit:.6f}")
+    print(f"SSHA_ANOMALY_LIMIT_M={ssha_limit:.6f}")
     print(f"OLCI_ANOMALY_LIMIT_M={olci_limit:.6f}")
     print(f"SWOT_MODEL_ANOMALY_LIMIT_M={model_limit:.6f}")
     print(f"WET_DELAY_PLOT_LIMIT_M={wet_delay_plot_limit:.6f}")

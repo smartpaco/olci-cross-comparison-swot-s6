@@ -55,11 +55,17 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
                 ("line", "pixel"),
                 1.2 + np.linspace(-0.03, 0.03, lines * pixels).reshape(lines, pixels),
             ),
+            "ssha_karin_2": (
+                ("line", "pixel"),
+                0.05
+                + np.linspace(-0.03, 0.03, lines * pixels).reshape(lines, pixels),
+            ),
             "sig0_karin_2": (
                 ("line", "pixel"),
                 np.linspace(0.08, 0.16, lines * pixels).reshape(lines, pixels),
             ),
             "ssh_karin_2_qual": (("line", "pixel"), quality),
+            "ssha_karin_2_qual": (("line", "pixel"), quality),
             "height_cor_xover": (
                 ("line", "pixel"),
                 np.full((lines, pixels), 0.01, dtype=np.float32),
@@ -162,7 +168,7 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
     )
 
     assert output_path.stat().st_size > 20_000
-    assert "SSH_REFERENCE_M=1.210000" in result.stdout
+    assert "SSHA_REFERENCE_M=0.060000" in result.stdout
     assert "XCAL_REFERENCE_M=0.010000" in result.stdout
     assert "XCAL_GOOD_PIXELS=12" in result.stdout
     assert "OLCI_VALID_PIXELS=16" in result.stdout

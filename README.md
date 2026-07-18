@@ -20,14 +20,15 @@ For selected matchups, the scientific comparison is visual:
 
 - map OLCI Total Column Water Vapour (TCWV/COWa) and its equivalent wet path
   delay at native OLCI resolution;
-- map fully corrected SWOT KaRIn sea-surface height (`ssh_karin_2`);
+- map SWOT KaRIn sea-surface-height anomaly with crossover calibration
+  (`ssha_karin_2 + height_cor_xover`);
 - map SWOT KaRIn normalized radar cross section (`sig0_karin_2`), converted to
   decibels for display;
 - map the positive equivalent wet path delay derived from the SWOT Expert
   `model_wet_tropo_cor` field;
 - inspect whether coherent structures in OLCI TCWV are still visible as wet
-  tropospheric path-delay residuals in corrected SWOT SSH;
-- interpret Sigma0 jointly with TCWV and SSH. Sigma0 responds to sea-surface
+  tropospheric path-delay residuals in XCAL-corrected SWOT SSHA;
+- interpret Sigma0 jointly with TCWV and SSHA. Sigma0 responds to sea-surface
   backscatter, but the Ka-band echo is also modified by atmospheric attenuation
   and precipitation. Small-scale atmospheric structures that are absent from
   the model-based correction can therefore appear in `sig0_karin_2`; they must
@@ -335,7 +336,7 @@ separate crossover calibration and its quality flag, SSHA, Sigma0, quality
 flags, surface classification, and an exact `in_vignette` mask. A one-feature
 GeoPackage and CSV are written beside it.
 
-## 6. Plot corrected SWOT SSH, Sigma0, OLCI delay, and SWOT model delay
+## 6. Plot XCAL-corrected SWOT SSHA, Sigma0, OLCI delay, and SWOT model delay
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
@@ -351,7 +352,7 @@ GeoPackage and CSV are written beside it.
 
 The figure contains four side-by-side panels in this order:
 
-1. XCAL-corrected SWOT SSH minus its vignette median;
+1. XCAL-corrected SWOT SSHA minus its vignette median;
 2. SWOT `sig0_karin_2` in decibels;
 3. SWOT model wet path delay minus its vignette median;
 4. OLCI `wet_tropo_path_delay` minus its vignette median.
@@ -361,25 +362,28 @@ The plotting code negates it to obtain a positive equivalent vertical wet path
 delay before removing its median, making its sign convention comparable to the
 OLCI-derived positive delay.
 
-The plotted SSH includes the crossover calibration supplied separately in the
+The plotted SSHA includes the crossover calibration supplied separately in the
 Unsmoothed product:
 
 ```text
-ssh_xcal = ssh_karin_2 + height_cor_xover
+ssha_xcal = ssha_karin_2 + height_cor_xover
 ```
 
 The product metadata explicitly instruct users to add `height_cor_xover` to
-`ssh_karin_2`. The subset script therefore retains both
+`ssha_karin_2`. The base SSHA already removes the CNES/CLS mean sea surface,
+solid-Earth tide, ocean tides, internal tide, pole tide, and dynamic
+atmospheric correction as documented in the product metadata. The subset
+script therefore retains both
 `height_cor_xover` and `height_cor_xover_qual`, and the plotting script uses
 only pixels whose XCAL quality is `good` (`height_cor_xover_qual == 0`). The
 figure title and console fields `XCAL_REFERENCE_M`,
 `XCAL_ANOMALY_LIMIT_M`, and `XCAL_GOOD_PIXELS` make this processing explicit.
 
 All figure titles, colour bars, annotations, and processing comments are in
-English. Corrected SSH and both wet-delay anomalies are expressed in metres.
+English. XCAL-corrected SSHA and both wet-delay anomalies are expressed in metres.
 `--scale-mode shared` applies one symmetric colour scale to all three metre
 panels for direct visual amplitude comparison. `--scale-mode independent`
-applies an independent symmetric 98th-percentile scale to SSH, while OLCI and
+applies an independent symmetric 98th-percentile scale to SSHA, while OLCI and
 the SWOT model wet-delay panels both use the OLCI 98th-percentile limit. This
 keeps the two wet-delay amplitudes directly comparable while still revealing
 their spatial patterns. The console field `WET_DELAY_PLOT_LIMIT_M` records the
@@ -391,7 +395,7 @@ curvilinear grid cells rather than point markers. This makes the panel read as
 an image while preserving the model product's native spatial resolution and
 without interpolating it onto the 250 m KaRIn grid. The sign of
 `cross_track_distance` is used to retain only the same left or right SWOT swath
-recorded in the SSH/Sigma0 subset.
+recorded in the SSHA/Sigma0 subset.
 
 The SWOT panels use native open-ocean pixels. `bad_not_usable` and
 `bad_outside_of_range` pixels are excluded. The OLCI panel uses finite wet-delay
