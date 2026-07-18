@@ -378,6 +378,11 @@ automatically detected for common 1-D or 2-D coordinate layouts. Non-standard
 names can be provided with `--olci-longitude-variable` and
 `--olci-latitude-variable`.
 
+The figure header and the console output report OLCI clear-sky data coverage.
+It is calculated as the percentage of ocean pixel centres inside the vignette
+that have a finite converted OLCI wet-delay value. The machine-readable console
+field is `OLCI_CLEAR_SKY_PERCENT`.
+
 The plotted `sig0_karin_2` uses a model-based atmospheric attenuation
 correction. Rain, cloud liquid water, and water-vapour-related attenuation can
 leave atmospheric signatures when that model does not resolve the observed

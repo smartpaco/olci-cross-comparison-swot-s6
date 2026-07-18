@@ -148,5 +148,6 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
 
     assert output_path.stat().st_size > 20_000
     assert "OLCI_VALID_PIXELS=16" in result.stdout
+    assert "OLCI_CLEAR_SKY_PERCENT=100.000000" in result.stdout
     assert "SWOT_MODEL_VALID_PIXELS=12" in result.stdout
     assert "SHARED_ANOMALY_LIMIT_M=" in result.stdout

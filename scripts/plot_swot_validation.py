@@ -230,14 +230,17 @@ def main() -> None:
         if land_geometry is not None
         else np.zeros(olci_lon.shape, dtype=bool)
     )
-    olci_mask = (
+    olci_ocean_footprint = (
         olci_inside
         & ~olci_on_land
         & np.isfinite(olci_lon)
         & np.isfinite(olci_lat)
-        & np.isfinite(olci_delay)
     )
+    olci_mask = olci_ocean_footprint & np.isfinite(olci_delay)
     require_valid(olci_mask, "OLCI wet path delay")
+    olci_clear_sky_percent = (
+        100.0 * float(olci_mask.sum()) / float(olci_ocean_footprint.sum())
+    )
     olci_x, olci_y = transformer.transform(olci_lon, olci_lat)
     olci_x, olci_y = olci_x / 1000.0, olci_y / 1000.0
     olci_reference = float(np.nanmedian(olci_delay[olci_mask]))
@@ -424,7 +427,8 @@ def main() -> None:
     pixel_summary = (
         f"valid pixels: SSH {int(ssh_mask.sum()):,}, "
         f"Sigma0 {int(sig0_mask.sum()):,}, OLCI delay {int(olci_mask.sum()):,}, "
-        f"SWOT model delay {int(model_mask.sum()):,}"
+        f"SWOT model delay {int(model_mask.sum()):,}; "
+        f"OLCI clear-sky coverage {olci_clear_sky_percent:.1f}%"
     )
     figure.suptitle(
         f"OLCI–SWOT wet-troposphere comparison — {args.title}\n"
@@ -463,6 +467,7 @@ def main() -> None:
     print(f"SCALE_MODE={args.scale_mode}")
     print(f"SIG0_DB_LIMITS={sig0_low:.6f},{sig0_high:.6f}")
     print(f"OLCI_VALID_PIXELS={int(olci_mask.sum())}")
+    print(f"OLCI_CLEAR_SKY_PERCENT={olci_clear_sky_percent:.6f}")
     print(f"SWOT_MODEL_VALID_PIXELS={int(model_mask.sum())}")
 
 
