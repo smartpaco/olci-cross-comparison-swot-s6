@@ -382,6 +382,7 @@ def main() -> None:
             ),
             "unit": "Model wet path-delay anomaly (m)",
             "size": 4.0,
+            "render": "mesh",
         },
     ]
 
@@ -397,23 +398,39 @@ def main() -> None:
                 zorder=1,
             )
         mask = panel["mask"]
-        points = axis.scatter(
-            panel["x"][mask],
-            panel["y"][mask],
-            c=panel["values"][mask],
-            s=panel["size"],
-            marker="s",
-            linewidths=0,
-            cmap=panel["cmap"],
-            norm=panel["norm"],
-            rasterized=True,
-            zorder=2,
-        )
+        if panel.get("render") == "mesh":
+            # The Expert product is a coarser curvilinear grid. Rendering its
+            # native cells produces a continuous image without inventing a
+            # finer resolution through interpolation.
+            artist = axis.pcolormesh(
+                panel["x"],
+                panel["y"],
+                np.ma.masked_where(~mask, panel["values"]),
+                shading="auto",
+                linewidth=0,
+                cmap=panel["cmap"],
+                norm=panel["norm"],
+                rasterized=True,
+                zorder=2,
+            )
+        else:
+            artist = axis.scatter(
+                panel["x"][mask],
+                panel["y"][mask],
+                c=panel["values"][mask],
+                s=panel["size"],
+                marker="s",
+                linewidths=0,
+                cmap=panel["cmap"],
+                norm=panel["norm"],
+                rasterized=True,
+                zorder=2,
+            )
         local_vignette.boundary.plot(
             ax=axis, color="#111111", linewidth=1.0, zorder=3
         )
         colorbar = figure.colorbar(
-            points, ax=axis, orientation="horizontal", pad=0.14, fraction=0.055
+            artist, ax=axis, orientation="horizontal", pad=0.14, fraction=0.055
         )
         colorbar.set_label(panel["unit"])
         axis.set_title(panel["title"], fontsize=10.5)

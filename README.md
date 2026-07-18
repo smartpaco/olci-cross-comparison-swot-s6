@@ -371,7 +371,10 @@ their spatial patterns. The console field `WET_DELAY_PLOT_LIMIT_M` records the
 limit used by both wet-delay colour bars.
 Sigma0 always uses an independent percentile-based dB scale. Each instrument
 remains on its native grid; no spatial resampling or resolution matching is
-performed.
+performed. The coarser SWOT Expert wet-delay field is rendered as filled native
+curvilinear grid cells rather than point markers. This makes the panel read as
+an image while preserving the model product's native spatial resolution and
+without interpolating it onto the 250 m KaRIn grid.
 
 The SWOT panels use native open-ocean pixels. `bad_not_usable` and
 `bad_outside_of_range` pixels are excluded. The OLCI panel uses finite wet-delay
