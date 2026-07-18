@@ -364,8 +364,11 @@ All figure titles, colour bars, annotations, and processing comments are in
 English. Corrected SSH and both wet-delay anomalies are expressed in metres.
 `--scale-mode shared` applies one symmetric colour scale to all three metre
 panels for direct visual amplitude comparison. `--scale-mode independent`
-applies separate symmetric 98th-percentile limits, revealing weaker spatial
-patterns while retaining numerical amplitude information on each colour bar.
+applies an independent symmetric 98th-percentile scale to SSH, while OLCI and
+the SWOT model wet-delay panels both use the OLCI 98th-percentile limit. This
+keeps the two wet-delay amplitudes directly comparable while still revealing
+their spatial patterns. The console field `WET_DELAY_PLOT_LIMIT_M` records the
+limit used by both wet-delay colour bars.
 Sigma0 always uses an independent percentile-based dB scale. Each instrument
 remains on its native grid; no spatial resampling or resolution matching is
 performed.

@@ -302,6 +302,7 @@ def main() -> None:
     )
     if args.scale_mode == "shared":
         ssh_norm = olci_norm = model_norm = shared_norm
+        wet_delay_plot_limit = shared_limit
         scale_description = (
             "SSH, OLCI delay, and SWOT model-delay anomalies share "
             f"±{shared_limit:.3f} m colour limits."
@@ -317,14 +318,13 @@ def main() -> None:
             vcenter=0.0,
             vmax=max(olci_limit, 1.0e-6),
         )
-        model_norm = TwoSlopeNorm(
-            vmin=-max(model_limit, 1.0e-6),
-            vcenter=0.0,
-            vmax=max(model_limit, 1.0e-6),
-        )
+        # Keep both wet-delay panels on the OLCI amplitude scale so their
+        # spatial variations remain directly comparable.
+        model_norm = olci_norm
+        wet_delay_plot_limit = olci_limit
         scale_description = (
-            "Independent symmetric 98th-percentile colour limits enhance "
-            "patterns; compare amplitudes from the metre colour-bar values."
+            "SSH uses an independent symmetric 98th-percentile scale; OLCI "
+            "and SWOT model wet delays share the OLCI 98th-percentile scale."
         )
 
     figure, axes = plt.subplots(1, 4, figsize=(26.0, 7.2), sharex=True, sharey=True)
@@ -464,6 +464,7 @@ def main() -> None:
     print(f"SSH_ANOMALY_LIMIT_M={ssh_limit:.6f}")
     print(f"OLCI_ANOMALY_LIMIT_M={olci_limit:.6f}")
     print(f"SWOT_MODEL_ANOMALY_LIMIT_M={model_limit:.6f}")
+    print(f"WET_DELAY_PLOT_LIMIT_M={wet_delay_plot_limit:.6f}")
     print(f"SCALE_MODE={args.scale_mode}")
     print(f"SIG0_DB_LIMITS={sig0_low:.6f},{sig0_high:.6f}")
     print(f"OLCI_VALID_PIXELS={int(olci_mask.sum())}")
