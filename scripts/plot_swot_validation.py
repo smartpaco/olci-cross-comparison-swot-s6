@@ -99,6 +99,11 @@ def parser() -> argparse.ArgumentParser:
         required=True,
         help="Converted OLCI NetCDF containing wet_tropo_path_delay",
     )
+    result.add_argument(
+        "--swot-model",
+        required=True,
+        help="SWOT L2 LR SSH Expert NetCDF containing model_wet_tropo_cor",
+    )
     result.add_argument("--vignette", required=True, help="Vignette GeoPackage")
     result.add_argument("--land", required=True, help="Land polygon dataset")
     result.add_argument("--output", required=True, help="Output figure path")
@@ -106,8 +111,20 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--olci-delay-variable", default="wet_tropo_path_delay"
     )
+    result.add_argument(
+        "--swot-model-variable", default="model_wet_tropo_cor"
+    )
     result.add_argument("--olci-longitude-variable")
     result.add_argument("--olci-latitude-variable")
+    result.add_argument(
+        "--scale-mode",
+        choices=("shared", "independent"),
+        default="shared",
+        help=(
+            "shared uses one metre scale for SSH and both wet delays; "
+            "independent enhances patterns with separate robust scales"
+        ),
+    )
     return result
 
 
@@ -203,6 +220,9 @@ def main() -> None:
         olci_source_variable = dataset[args.olci_delay_variable].attrs.get(
             "source_variable", "TCWV"
         )
+        olci_conversion_method = dataset[args.olci_delay_variable].attrs.get(
+            "conversion_method", "conversion method not recorded"
+        )
 
     olci_inside = contains_xy(polygon, olci_lon, olci_lat)
     olci_on_land = (
@@ -223,14 +243,88 @@ def main() -> None:
     olci_reference = float(np.nanmedian(olci_delay[olci_mask]))
     olci_anomaly = olci_delay - olci_reference
 
+    with xr.open_dataset(args.swot_model, mask_and_scale=True) as dataset:
+        required_model_variables = (
+            args.swot_model_variable,
+            "longitude",
+            "latitude",
+            "ssh_karin_2_qual",
+            "ancillary_surface_classification_flag",
+        )
+        missing = [name for name in required_model_variables if name not in dataset]
+        if missing:
+            argument_parser.error(
+                "SWOT model file is missing: " + ", ".join(missing)
+            )
+        model_lon = np.asarray(dataset["longitude"].values, dtype=float)
+        model_lon = ((model_lon + 180.0) % 360.0) - 180.0
+        model_lat = np.asarray(dataset["latitude"].values, dtype=float)
+        model_correction = np.asarray(
+            dataset[args.swot_model_variable].values, dtype=float
+        )
+        model_flags = np.nan_to_num(
+            dataset["ssh_karin_2_qual"].values, nan=2**32 - 1
+        ).astype(np.uint32)
+        model_surface = np.asarray(
+            dataset["ancillary_surface_classification_flag"].values
+        )
+
+    model_inside = contains_xy(polygon, model_lon, model_lat)
+    model_mask = (
+        model_inside
+        & (model_surface == 0)
+        & np.isfinite(model_lon)
+        & np.isfinite(model_lat)
+        & np.isfinite(model_correction)
+        & ((model_flags & BAD_NOT_USABLE) == 0)
+        & ((model_flags & BAD_OUTSIDE_RANGE) == 0)
+    )
+    require_valid(model_mask, "SWOT model wet-troposphere correction")
+    model_x, model_y = transformer.transform(model_lon, model_lat)
+    model_x, model_y = model_x / 1000.0, model_y / 1000.0
+    # SWOT stores a negative range correction. Negating it gives a positive
+    # equivalent vertical wet path delay comparable to the OLCI-derived delay.
+    model_delay = -model_correction
+    model_reference = float(np.nanmedian(model_delay[model_mask]))
+    model_anomaly = model_delay - model_reference
+
     ssh_limit = float(np.nanpercentile(np.abs(ssh_anomaly[ssh_mask]), 98.0))
     olci_limit = float(np.nanpercentile(np.abs(olci_anomaly[olci_mask]), 98.0))
-    shared_limit = max(ssh_limit, olci_limit, 1.0e-6)
+    model_limit = float(
+        np.nanpercentile(np.abs(model_anomaly[model_mask]), 98.0)
+    )
+    shared_limit = max(ssh_limit, olci_limit, model_limit, 1.0e-6)
     shared_norm = TwoSlopeNorm(
         vmin=-shared_limit, vcenter=0.0, vmax=shared_limit
     )
+    if args.scale_mode == "shared":
+        ssh_norm = olci_norm = model_norm = shared_norm
+        scale_description = (
+            "SSH, OLCI delay, and SWOT model-delay anomalies share "
+            f"±{shared_limit:.3f} m colour limits."
+        )
+    else:
+        ssh_norm = TwoSlopeNorm(
+            vmin=-max(ssh_limit, 1.0e-6),
+            vcenter=0.0,
+            vmax=max(ssh_limit, 1.0e-6),
+        )
+        olci_norm = TwoSlopeNorm(
+            vmin=-max(olci_limit, 1.0e-6),
+            vcenter=0.0,
+            vmax=max(olci_limit, 1.0e-6),
+        )
+        model_norm = TwoSlopeNorm(
+            vmin=-max(model_limit, 1.0e-6),
+            vcenter=0.0,
+            vmax=max(model_limit, 1.0e-6),
+        )
+        scale_description = (
+            "Independent symmetric 98th-percentile colour limits enhance "
+            "patterns; compare amplitudes from the metre colour-bar values."
+        )
 
-    figure, axes = plt.subplots(1, 3, figsize=(20.4, 7.2), sharex=True, sharey=True)
+    figure, axes = plt.subplots(1, 4, figsize=(26.0, 7.2), sharex=True, sharey=True)
     figure.subplots_adjust(
         left=0.045, right=0.99, bottom=0.24, top=0.82, wspace=0.11
     )
@@ -242,7 +336,7 @@ def main() -> None:
             "mask": ssh_mask,
             "values": ssh_anomaly,
             "cmap": cmocean.cm.balance,
-            "norm": shared_norm,
+            "norm": ssh_norm,
             "title": f"Corrected SWOT SSH − median ({ssh_reference:.3f} m)",
             "unit": "SSH anomaly (m)",
             "size": 4.0,
@@ -266,10 +360,25 @@ def main() -> None:
             "mask": olci_mask,
             "values": olci_anomaly,
             "cmap": cmocean.cm.balance,
-            "norm": shared_norm,
+            "norm": olci_norm,
             "title": f"OLCI wet path delay − median ({olci_reference:.3f} m)",
             "unit": "Wet path-delay anomaly (m)",
             "size": 5.0,
+        },
+        {
+            "axis": axes[3],
+            "x": model_x,
+            "y": model_y,
+            "mask": model_mask,
+            "values": model_anomaly,
+            "cmap": cmocean.cm.balance,
+            "norm": model_norm,
+            "title": (
+                "SWOT model wet path delay − median "
+                f"({model_reference:.3f} m)"
+            ),
+            "unit": "Model wet path-delay anomaly (m)",
+            "size": 4.0,
         },
     ]
 
@@ -314,7 +423,8 @@ def main() -> None:
 
     pixel_summary = (
         f"valid pixels: SSH {int(ssh_mask.sum()):,}, "
-        f"Sigma0 {int(sig0_mask.sum()):,}, OLCI delay {int(olci_mask.sum()):,}"
+        f"Sigma0 {int(sig0_mask.sum()):,}, OLCI delay {int(olci_mask.sum()):,}, "
+        f"SWOT model delay {int(model_mask.sum()):,}"
     )
     figure.suptitle(
         f"OLCI–SWOT wet-troposphere comparison — {args.title}\n"
@@ -325,11 +435,13 @@ def main() -> None:
     figure.text(
         0.5,
         0.025,
-        "Native sensor grids; no spatial resampling. SSH and OLCI delay anomalies "
-        f"share ±{shared_limit:.3f} m colour limits. "
+        f"Native sensor grids; no spatial resampling. {scale_description} "
         "Sigma0 can contain both surface and atmospheric signatures.\n"
         f"Vignette and open-ocean SWOT quality masks applied; {degraded} degraded "
-        f"SSH pixels retained. OLCI delay source: {olci_source_variable}. {source_label}",
+        f"SSH pixels retained. OLCI delay source: {olci_source_variable}; "
+        f"{olci_conversion_method}. "
+        "SWOT model delay = −model_wet_tropo_cor. "
+        f"{source_label}",
         ha="center",
         va="bottom",
         fontsize=8.3,
@@ -343,9 +455,15 @@ def main() -> None:
     print(f"PLOT={output}")
     print(f"SSH_REFERENCE_M={ssh_reference:.6f}")
     print(f"OLCI_DELAY_REFERENCE_M={olci_reference:.6f}")
+    print(f"SWOT_MODEL_DELAY_REFERENCE_M={model_reference:.6f}")
     print(f"SHARED_ANOMALY_LIMIT_M={shared_limit:.6f}")
+    print(f"SSH_ANOMALY_LIMIT_M={ssh_limit:.6f}")
+    print(f"OLCI_ANOMALY_LIMIT_M={olci_limit:.6f}")
+    print(f"SWOT_MODEL_ANOMALY_LIMIT_M={model_limit:.6f}")
+    print(f"SCALE_MODE={args.scale_mode}")
     print(f"SIG0_DB_LIMITS={sig0_low:.6f},{sig0_high:.6f}")
     print(f"OLCI_VALID_PIXELS={int(olci_mask.sum())}")
+    print(f"SWOT_MODEL_VALID_PIXELS={int(model_mask.sum())}")
 
 
 if __name__ == "__main__":

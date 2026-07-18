@@ -37,6 +37,7 @@ def test_olci_coordinates_broadcast_to_delay_grid() -> None:
 @pytest.mark.filterwarnings("ignore:numpy.ndarray size changed:RuntimeWarning")
 def test_three_panel_comparison_plot(tmp_path: Path) -> None:
     swot_path = tmp_path / "swot_subset.nc"
+    swot_model_path = tmp_path / "swot_expert.nc"
     olci_path = tmp_path / "olci_delay.nc"
     vignette_path = tmp_path / "vignette.gpkg"
     land_path = tmp_path / "land.gpkg"
@@ -92,6 +93,25 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
         },
     ).to_netcdf(olci_path)
 
+    xr.Dataset(
+        {
+            "longitude": (("line", "pixel"), longitude),
+            "latitude": (("line", "pixel"), latitude),
+            "model_wet_tropo_cor": (
+                ("line", "pixel"),
+                -0.22
+                + np.linspace(0.03, -0.03, lines * pixels).reshape(
+                    lines, pixels
+                ),
+            ),
+            "ssh_karin_2_qual": (("line", "pixel"), quality),
+            "ancillary_surface_classification_flag": (
+                ("line", "pixel"),
+                np.zeros((lines, pixels), dtype=np.uint8),
+            ),
+        }
+    ).to_netcdf(swot_model_path)
+
     gpd.GeoDataFrame(geometry=[box(-0.5, -0.5, 0.5, 0.5)], crs=4326).to_file(
         vignette_path
     )
@@ -109,6 +129,8 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
             str(swot_path),
             "--olci",
             str(olci_path),
+            "--swot-model",
+            str(swot_model_path),
             "--vignette",
             str(vignette_path),
             "--land",
@@ -126,4 +148,5 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
 
     assert output_path.stat().st_size > 20_000
     assert "OLCI_VALID_PIXELS=16" in result.stdout
+    assert "SWOT_MODEL_VALID_PIXELS=12" in result.stdout
     assert "SHARED_ANOMALY_LIMIT_M=" in result.stdout

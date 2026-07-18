@@ -23,6 +23,8 @@ For selected matchups, the scientific comparison is visual:
 - map fully corrected SWOT KaRIn sea-surface height (`ssh_karin_2`);
 - map SWOT KaRIn normalized radar cross section (`sig0_karin_2`), converted to
   decibels for display;
+- map the positive equivalent wet path delay derived from the SWOT Expert
+  `model_wet_tropo_cor` field;
 - inspect whether coherent structures in OLCI TCWV are still visible as wet
   tropospheric path-delay residuals in corrected SWOT SSH;
 - interpret Sigma0 jointly with TCWV and SSH. Sigma0 responds to sea-surface
@@ -251,6 +253,20 @@ Download the matching SWOT L2 LR Unsmoothed granule from NASA Earthdata:
   --swot-pass 537
 ```
 
+The SWOT model wet-troposphere field is stored in the matching Expert product.
+Download that much smaller granule with the same cycle, pass, and time window:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\download_validation_products.py `
+  --credentials "C:\path\outside\the\repository\credentials.txt" `
+  --output "data\validation_case" `
+  --source swot `
+  --swot-collection SWOT_L2_LR_SSH_EXPERT_D `
+  --swot-start 2026-06-17T14:40:00Z `
+  --swot-end 2026-06-17T15:40:00Z `
+  --swot-pass 537
+```
+
 The download script skips existing non-empty files and writes via `.part`
 files before atomically renaming completed downloads.
 
@@ -277,14 +293,18 @@ Run the conversion after downloading the selected `TCWV.nc` file:
 .\.venv\Scripts\python.exe scripts\convert_olci_tcwv.py `
   --input "data\validation_case\olci\TCWV.nc" `
   --output "data\validation_case\olci\TCWV_with_wet_delay.nc" `
-  --tcwv-variable IWV_W `
+  --vignette "data\validation_case\swot_subset.gpkg" `
   --mean-temperature-k 270
 ```
 
-The variable name is detected automatically among `IWV_W`, `TCWV`, and common
-case variants when `--tcwv-variable` is omitted. The output is a copy of the
-input NetCDF with a float32 `wet_tropo_path_delay` variable in metres. Existing
-scale factors and fill values are decoded by xarray before conversion.
+The variable name is detected automatically among `IWV_W`, `TCWV`, `tcwv`, and
+common case variants when `--tcwv-variable` is omitted. With `--vignette`, the
+converter first locates the relevant OLCI rows and columns and loads only TCWV,
+longitude, latitude, uncertainty, and quality information. This avoids loading
+the full 4091 x 4865 product into memory. Pixels with `qi = 0` are excluded.
+The compact output contains a float32 `wet_tropo_path_delay` variable in metres
+and an exact `in_vignette` mask. Existing scale factors and fill values are
+decoded by xarray before conversion.
 
 With the default `Tm = 270 K`, the conversion factor is
 6.388 mm of wet delay per kg m⁻² of TCWV, close to the commonly quoted
@@ -314,30 +334,41 @@ The subset contains native SWOT pixels, geolocation, time, corrected SSH,
 SSHA, Sigma0, quality flags, surface classification, and an exact
 `in_vignette` mask. A one-feature GeoPackage and CSV are written beside it.
 
-## 6. Plot corrected SWOT SSH, Sigma0, and OLCI wet path delay
+## 6. Plot corrected SWOT SSH, Sigma0, OLCI delay, and SWOT model delay
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
   --subset "data\validation_case\swot_subset.nc" `
   --olci "data\validation_case\olci\TCWV_with_wet_delay.nc" `
+  --swot-model "data\validation_case\swot\<SWOT Expert granule>.nc" `
   --vignette "data\validation_case\swot_subset.gpkg" `
   --land "data\natural_earth\ne_10m_land.zip" `
   --title "coastal validation case" `
-  --output "outputs\olci_swot_ssh_sig0_wet_delay.png"
+  --scale-mode independent `
+  --output "outputs\olci_swot_four_panel_patterns.png"
 ```
 
-The figure contains three side-by-side panels in this order:
+The figure contains four side-by-side panels in this order:
 
 1. corrected SWOT `ssh_karin_2` minus its vignette median;
 2. SWOT `sig0_karin_2` in decibels;
 3. OLCI `wet_tropo_path_delay` minus its vignette median.
+4. SWOT model wet path delay minus its vignette median.
+
+The Expert variable `model_wet_tropo_cor` is a negative correction in metres.
+The plotting code negates it to obtain a positive equivalent vertical wet path
+delay before removing its median, making its sign convention comparable to the
+OLCI-derived positive delay.
 
 All figure titles, colour bars, annotations, and processing comments are in
-English. Corrected SSH and OLCI wet-delay anomalies are both expressed in
-metres and use the same symmetric colour limits, allowing their amplitudes to
-be compared directly. Sigma0 uses an independent percentile-based dB scale.
-Each instrument remains on its native grid; no spatial resampling or resolution
-matching is performed.
+English. Corrected SSH and both wet-delay anomalies are expressed in metres.
+`--scale-mode shared` applies one symmetric colour scale to all three metre
+panels for direct visual amplitude comparison. `--scale-mode independent`
+applies separate symmetric 98th-percentile limits, revealing weaker spatial
+patterns while retaining numerical amplitude information on each colour bar.
+Sigma0 always uses an independent percentile-based dB scale. Each instrument
+remains on its native grid; no spatial resampling or resolution matching is
+performed.
 
 The SWOT panels use native open-ocean pixels. `bad_not_usable` and
 `bad_outside_of_range` pixels are excluded. The OLCI panel uses finite wet-delay
@@ -375,8 +406,8 @@ quality information for the vignette.
 
 The tests cover ORF parsing and interpolation, tangent geometry handling,
 space-time prefilter behaviour, polar-latitude rejection, the TCWV-to-wet-delay
-physics, NetCDF conversion, OLCI coordinate broadcasting, and generation of the
-three-panel comparison figure.
+physics, memory-efficient NetCDF conversion, OLCI coordinate broadcasting, and
+generation of the four-panel comparison figure.
 
 ## Current limitations
 

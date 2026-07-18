@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
+from shapely import contains_xy
 import xarray as xr
 
 from satmatch.tropo import (
@@ -14,6 +16,8 @@ from satmatch.tropo import (
 
 
 TCWV_CANDIDATES = ("IWV_W", "TCWV", "tcwv", "IWV", "iwv")
+LONGITUDE_CANDIDATES = ("longitude", "lon")
+LATITUDE_CANDIDATES = ("latitude", "lat")
 
 
 def find_tcwv_variable(dataset: xr.Dataset, requested: str | None = None) -> str:
@@ -33,12 +37,82 @@ def find_tcwv_variable(dataset: xr.Dataset, requested: str | None = None) -> str
     )
 
 
+def find_coordinate_variable(
+    dataset: xr.Dataset, candidates: tuple[str, ...], role: str
+) -> str:
+    available = {name.casefold(): name for name in dataset.variables}
+    for candidate in candidates:
+        if candidate in dataset.variables:
+            return candidate
+        if candidate.casefold() in available:
+            return available[candidate.casefold()]
+    raise ValueError(f"No {role} variable found in the OLCI file")
+
+
+def load_vignette_subset(
+    source: xr.Dataset,
+    tcwv_name: str,
+    vignette_path: str | Path,
+) -> xr.Dataset:
+    """Load only the OLCI rows and columns surrounding one vignette."""
+    vignette = gpd.read_file(vignette_path).to_crs(4326)
+    if len(vignette) != 1:
+        raise ValueError("The vignette file must contain exactly one feature")
+    polygon = vignette.geometry.iloc[0]
+    min_lon, min_lat, max_lon, max_lat = polygon.bounds
+    longitude_name = find_coordinate_variable(
+        source, LONGITUDE_CANDIDATES, "longitude"
+    )
+    latitude_name = find_coordinate_variable(source, LATITUDE_CANDIDATES, "latitude")
+    longitude = np.asarray(source[longitude_name].values, dtype=float)
+    longitude = ((longitude + 180.0) % 360.0) - 180.0
+    latitude = np.asarray(source[latitude_name].values, dtype=float)
+    bbox = (
+        (longitude >= min_lon - 0.05)
+        & (longitude <= max_lon + 0.05)
+        & (latitude >= min_lat - 0.05)
+        & (latitude <= max_lat + 0.05)
+    )
+    rows, columns = np.where(bbox)
+    if rows.size == 0:
+        raise ValueError("No OLCI pixels overlap the vignette bounding box")
+    row_dimension, column_dimension = source[tcwv_name].dims
+    row_slice = slice(max(0, int(rows.min()) - 2), int(rows.max()) + 3)
+    column_slice = slice(max(0, int(columns.min()) - 2), int(columns.max()) + 3)
+    keep = [tcwv_name, longitude_name, latitude_name]
+    keep.extend(
+        name for name in ("quality_flags", "qi", "unc") if name in source
+    )
+    subset = source[keep].isel(
+        {row_dimension: row_slice, column_dimension: column_slice}
+    ).load()
+    subset_longitude = np.asarray(subset[longitude_name].values, dtype=float)
+    subset_longitude = ((subset_longitude + 180.0) % 360.0) - 180.0
+    subset[longitude_name] = xr.DataArray(
+        subset_longitude,
+        dims=subset[longitude_name].dims,
+        attrs=subset[longitude_name].attrs,
+    )
+    subset["in_vignette"] = xr.DataArray(
+        contains_xy(polygon, subset_longitude, subset[latitude_name].values),
+        dims=subset[tcwv_name].dims,
+        attrs={"long_name": "pixel centre inside the matchup vignette"},
+    )
+    subset.attrs.update(source.attrs)
+    subset.attrs["spatial_subset"] = Path(vignette_path).name
+    return subset
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description="Convert OLCI TCWV/IWV_W to positive one-way zenith wet path delay."
     )
     result.add_argument("--input", required=True, help="Input OLCI TCWV NetCDF file")
     result.add_argument("--output", required=True, help="Output NetCDF file")
+    result.add_argument(
+        "--vignette",
+        help="Optional one-feature GeoPackage used to crop the OLCI granule before conversion",
+    )
     result.add_argument(
         "--tcwv-variable",
         help="TCWV variable name; automatically detects IWV_W or TCWV when omitted",
@@ -72,14 +146,20 @@ def main() -> None:
     if output_path.exists() and not args.overwrite:
         argument_parser.error(f"Output already exists: {output_path}; use --overwrite")
 
-    with xr.open_dataset(input_path, mask_and_scale=True) as source:
-        dataset = source.load()
-
     try:
-        tcwv_name = find_tcwv_variable(dataset, args.tcwv_variable)
+        with xr.open_dataset(input_path, mask_and_scale=True) as source:
+            tcwv_name = find_tcwv_variable(source, args.tcwv_variable)
+            dataset = (
+                load_vignette_subset(source, tcwv_name, args.vignette)
+                if args.vignette
+                else source.load()
+            )
     except ValueError as error:
         argument_parser.error(str(error))
-    tcwv = dataset[tcwv_name].where(dataset[tcwv_name] >= 0.0)
+    valid_tcwv = dataset[tcwv_name] >= 0.0
+    if "qi" in dataset:
+        valid_tcwv &= dataset["qi"] > 0
+    tcwv = dataset[tcwv_name].where(valid_tcwv)
 
     if args.tm_variable:
         if args.tm_variable not in dataset:
