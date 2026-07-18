@@ -24,8 +24,9 @@ For selected matchups, the scientific comparison is visual:
   (`ssha_karin_2 + height_cor_xover`);
 - map SWOT KaRIn normalized radar cross section (`sig0_karin_2`), converted to
   decibels for display;
-- map the positive equivalent wet path delay derived from the SWOT Expert
-  `model_wet_tropo_cor` field;
+- map the positive equivalent wet path delay derived from the SWOT Advanced
+  Microwave Radiometer (AMR) correction `rad_wet_tropo_cor` in the Expert
+  product;
 - inspect whether coherent structures in OLCI TCWV are still visible as wet
   tropospheric path-delay residuals in XCAL-corrected SWOT SSHA;
 - interpret Sigma0 jointly with TCWV and SSHA. Sigma0 responds to sea-surface
@@ -254,8 +255,9 @@ Download the matching SWOT L2 LR Unsmoothed granule from NASA Earthdata:
   --swot-pass 537
 ```
 
-The SWOT model wet-troposphere field is stored in the matching Expert product.
-Download that much smaller granule with the same cycle, pass, and time window:
+The SWOT AMR wet-troposphere correction is stored in the matching Expert
+product. Download that much smaller granule with the same cycle, pass, and time
+window:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\download_validation_products.py `
@@ -336,13 +338,13 @@ separate crossover calibration and its quality flag, SSHA, Sigma0, quality
 flags, surface classification, and an exact `in_vignette` mask. A one-feature
 GeoPackage and CSV are written beside it.
 
-## 6. Plot XCAL-corrected SWOT SSHA, Sigma0, OLCI delay, and SWOT model delay
+## 6. Plot XCAL-corrected SWOT SSHA, Sigma0, OLCI delay, and SWOT AMR delay
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
   --subset "data\validation_case\swot_subset.nc" `
   --olci "data\validation_case\olci\TCWV_with_wet_delay.nc" `
-  --swot-model "data\validation_case\swot\<SWOT Expert granule>.nc" `
+  --swot-expert "data\validation_case\swot\<SWOT Expert granule>.nc" `
   --vignette "data\validation_case\swot_subset.gpkg" `
   --land "data\natural_earth\ne_10m_land.zip" `
   --title "coastal validation case" `
@@ -354,13 +356,15 @@ The figure contains four side-by-side panels in this order:
 
 1. XCAL-corrected SWOT SSHA minus its vignette median;
 2. SWOT `sig0_karin_2` in decibels;
-3. SWOT model wet path delay minus its vignette median;
+3. SWOT AMR wet path delay minus its vignette median;
 4. OLCI `wet_tropo_path_delay` minus its vignette median.
 
-The Expert variable `model_wet_tropo_cor` is a negative correction in metres.
-The plotting code negates it to obtain a positive equivalent vertical wet path
-delay before removing its median, making its sign convention comparable to the
-OLCI-derived positive delay.
+The Expert variable `rad_wet_tropo_cor` is the wet-troposphere vertical
+correction derived from the Advanced Microwave Radiometer. It is stored as a
+negative correction in metres. The plotting code negates it to obtain a
+positive equivalent vertical wet path delay before removing its median, making
+its sign convention comparable to the OLCI-derived positive delay. The map is
+therefore labelled as an AMR wet path delay, not as a weather-model correction.
 
 The plotted SSHA includes the crossover calibration supplied separately in the
 Unsmoothed product:
@@ -384,21 +388,25 @@ English. XCAL-corrected SSHA and both wet-delay anomalies are expressed in metre
 `--scale-mode shared` applies one symmetric colour scale to all three metre
 panels for direct visual amplitude comparison. `--scale-mode independent`
 applies an independent symmetric 98th-percentile scale to SSHA, while OLCI and
-the SWOT model wet-delay panels both use the OLCI 98th-percentile limit. This
+the SWOT AMR wet-delay panels both use the OLCI 98th-percentile limit. This
 keeps the two wet-delay amplitudes directly comparable while still revealing
 their spatial patterns. The console field `WET_DELAY_PLOT_LIMIT_M` records the
 limit used by both wet-delay colour bars.
 Sigma0 always uses an independent percentile-based dB scale. Each instrument
 remains on its native grid; no spatial resampling or resolution matching is
-performed. The coarser SWOT Expert wet-delay field is rendered as filled native
-curvilinear grid cells rather than point markers. This makes the panel read as
-an image while preserving the model product's native spatial resolution and
-without interpolating it onto the 250 m KaRIn grid. The sign of
+performed. The AMR correction distributed in the SWOT Expert product is
+rendered as filled native 2 km curvilinear grid cells rather than point markers.
+The underlying AMR observations are made by the two radiometer beams near the
+centres of the KaRIn swaths; `rad_wet_tropo_cor` is the SWOT Level-2 correction
+mapped across that grid. The plotting code does not interpolate it onto the
+250 m KaRIn grid. The sign of
 `cross_track_distance` is used to retain only the same left or right SWOT swath
 recorded in the SSHA/Sigma0 subset.
 
-The SWOT panels use native open-ocean pixels. `bad_not_usable` and
-`bad_outside_of_range` pixels are excluded. The OLCI panel uses finite wet-delay
+The SWOT panels use native open-ocean pixels. `bad_not_usable`,
+`bad_outside_of_range`, and `bad_radiometer_corr_missing` pixels are excluded
+from the AMR panel. Lines whose selected AMR footprint is marked as invalid by
+land contamination are also excluded. The OLCI panel uses finite wet-delay
 pixels over ocean whose centres fall inside the exact vignette polygon; land,
 invalid, or cloudy TCWV pixels remain absent. OLCI longitude and latitude are
 automatically detected for common 1-D or 2-D coordinate layouts. Non-standard

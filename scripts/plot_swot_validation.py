@@ -17,6 +17,7 @@ import xarray as xr
 
 BAD_NOT_USABLE = np.uint32(1 << 31)
 BAD_OUTSIDE_RANGE = np.uint32(1 << 29)
+BAD_RADIOMETER_CORR_MISSING = np.uint32(1 << 28)
 OLCI_LONGITUDE_CANDIDATES = ("longitude", "lon", "longitude_signed")
 OLCI_LATITUDE_CANDIDATES = ("latitude", "lat")
 
@@ -90,7 +91,8 @@ def require_valid(mask: np.ndarray, label: str) -> None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description=(
-            "Plot colocated XCAL-corrected SWOT SSHA, SWOT Sigma0, and OLCI wet path delay."
+            "Plot colocated XCAL-corrected SWOT SSHA, SWOT Sigma0, "
+            "SWOT AMR wet path delay, and OLCI wet path delay."
         )
     )
     result.add_argument("--subset", required=True, help="SWOT vignette NetCDF")
@@ -100,9 +102,11 @@ def parser() -> argparse.ArgumentParser:
         help="Converted OLCI NetCDF containing wet_tropo_path_delay",
     )
     result.add_argument(
+        "--swot-expert",
         "--swot-model",
+        dest="swot_expert",
         required=True,
-        help="SWOT L2 LR SSH Expert NetCDF containing model_wet_tropo_cor",
+        help="SWOT L2 LR SSH Expert NetCDF containing rad_wet_tropo_cor",
     )
     result.add_argument("--vignette", required=True, help="Vignette GeoPackage")
     result.add_argument("--land", required=True, help="Land polygon dataset")
@@ -112,7 +116,11 @@ def parser() -> argparse.ArgumentParser:
         "--olci-delay-variable", default="wet_tropo_path_delay"
     )
     result.add_argument(
-        "--swot-model-variable", default="model_wet_tropo_cor"
+        "--swot-radiometer-variable",
+        "--swot-model-variable",
+        dest="swot_radiometer_variable",
+        default="rad_wet_tropo_cor",
+        help="AMR wet-troposphere correction variable in the Expert product",
     )
     result.add_argument("--olci-longitude-variable")
     result.add_argument("--olci-latitude-variable")
@@ -276,73 +284,86 @@ def main() -> None:
     olci_reference = float(np.nanmedian(olci_delay[olci_mask]))
     olci_anomaly = olci_delay - olci_reference
 
-    with xr.open_dataset(args.swot_model, mask_and_scale=True) as dataset:
-        required_model_variables = (
-            args.swot_model_variable,
+    with xr.open_dataset(args.swot_expert, mask_and_scale=True) as dataset:
+        required_amr_variables = (
+            args.swot_radiometer_variable,
             "longitude",
             "latitude",
             "cross_track_distance",
-            "ssh_karin_2_qual",
+            "ssh_karin_qual",
             "ancillary_surface_classification_flag",
+            "rad_surface_type_flag",
         )
-        missing = [name for name in required_model_variables if name not in dataset]
+        missing = [name for name in required_amr_variables if name not in dataset]
         if missing:
             argument_parser.error(
-                "SWOT model file is missing: " + ", ".join(missing)
+                "SWOT Expert file is missing AMR fields: " + ", ".join(missing)
             )
-        model_lon = np.asarray(dataset["longitude"].values, dtype=float)
-        model_lon = ((model_lon + 180.0) % 360.0) - 180.0
-        model_lat = np.asarray(dataset["latitude"].values, dtype=float)
-        model_correction = np.asarray(
-            dataset[args.swot_model_variable].values, dtype=float
+        amr_lon = np.asarray(dataset["longitude"].values, dtype=float)
+        amr_lon = ((amr_lon + 180.0) % 360.0) - 180.0
+        amr_lat = np.asarray(dataset["latitude"].values, dtype=float)
+        amr_correction = np.asarray(
+            dataset[args.swot_radiometer_variable].values, dtype=float
         )
-        model_cross_track = np.asarray(
+        amr_cross_track = np.asarray(
             dataset["cross_track_distance"].values, dtype=float
         )
-        model_flags = np.nan_to_num(
-            dataset["ssh_karin_2_qual"].values, nan=2**32 - 1
+        amr_flags = np.nan_to_num(
+            dataset["ssh_karin_qual"].values, nan=2**32 - 1
         ).astype(np.uint32)
-        model_surface = np.asarray(
+        amr_surface = np.asarray(
             dataset["ancillary_surface_classification_flag"].values
         )
+        radiometer_surface = np.asarray(
+            dataset["rad_surface_type_flag"].values
+        )
 
-    model_inside = contains_xy(polygon, model_lon, model_lat)
-    model_selected_side = (
-        model_cross_track < 0.0 if swot_side == "left" else model_cross_track > 0.0
+    amr_inside = contains_xy(polygon, amr_lon, amr_lat)
+    amr_selected_side = (
+        amr_cross_track < 0.0 if swot_side == "left" else amr_cross_track > 0.0
     )
-    model_mask = (
-        model_inside
-        & model_selected_side
-        & (model_surface == 0)
-        & np.isfinite(model_lon)
-        & np.isfinite(model_lat)
-        & np.isfinite(model_correction)
-        & ((model_flags & BAD_NOT_USABLE) == 0)
-        & ((model_flags & BAD_OUTSIDE_RANGE) == 0)
+    # The two num_sides columns are left and right, respectively. Reject lines
+    # for which the selected AMR footprint is invalid because of land
+    # contamination; both open-ocean and coastal-ocean retrievals are retained.
+    radiometer_side_index = 0 if swot_side == "left" else 1
+    amr_surface_valid = np.isin(
+        radiometer_surface[:, radiometer_side_index], (0, 1)
     )
-    require_valid(model_mask, "SWOT model wet-troposphere correction")
-    model_x, model_y = transformer.transform(model_lon, model_lat)
-    model_x, model_y = model_x / 1000.0, model_y / 1000.0
+    amr_mask = (
+        amr_inside
+        & amr_selected_side
+        & (amr_surface == 0)
+        & amr_surface_valid[:, np.newaxis]
+        & np.isfinite(amr_lon)
+        & np.isfinite(amr_lat)
+        & np.isfinite(amr_correction)
+        & ((amr_flags & BAD_RADIOMETER_CORR_MISSING) == 0)
+        & ((amr_flags & BAD_NOT_USABLE) == 0)
+        & ((amr_flags & BAD_OUTSIDE_RANGE) == 0)
+    )
+    require_valid(amr_mask, "SWOT AMR wet-troposphere correction")
+    amr_x, amr_y = transformer.transform(amr_lon, amr_lat)
+    amr_x, amr_y = amr_x / 1000.0, amr_y / 1000.0
     # SWOT stores a negative range correction. Negating it gives a positive
     # equivalent vertical wet path delay comparable to the OLCI-derived delay.
-    model_delay = -model_correction
-    model_reference = float(np.nanmedian(model_delay[model_mask]))
-    model_anomaly = model_delay - model_reference
+    amr_delay = -amr_correction
+    amr_reference = float(np.nanmedian(amr_delay[amr_mask]))
+    amr_anomaly = amr_delay - amr_reference
 
     ssha_limit = float(np.nanpercentile(np.abs(ssha_anomaly[ssha_mask]), 98.0))
     olci_limit = float(np.nanpercentile(np.abs(olci_anomaly[olci_mask]), 98.0))
-    model_limit = float(
-        np.nanpercentile(np.abs(model_anomaly[model_mask]), 98.0)
+    amr_limit = float(
+        np.nanpercentile(np.abs(amr_anomaly[amr_mask]), 98.0)
     )
-    shared_limit = max(ssha_limit, olci_limit, model_limit, 1.0e-6)
+    shared_limit = max(ssha_limit, olci_limit, amr_limit, 1.0e-6)
     shared_norm = TwoSlopeNorm(
         vmin=-shared_limit, vcenter=0.0, vmax=shared_limit
     )
     if args.scale_mode == "shared":
-        ssha_norm = olci_norm = model_norm = shared_norm
+        ssha_norm = olci_norm = amr_norm = shared_norm
         wet_delay_plot_limit = shared_limit
         scale_description = (
-            "SSHA, OLCI delay, and SWOT model-delay anomalies share "
+            "SSHA, OLCI delay, and SWOT AMR-delay anomalies share "
             f"±{shared_limit:.3f} m colour limits."
         )
     else:
@@ -358,11 +379,11 @@ def main() -> None:
         )
         # Keep both wet-delay panels on the OLCI amplitude scale so their
         # spatial variations remain directly comparable.
-        model_norm = olci_norm
+        amr_norm = olci_norm
         wet_delay_plot_limit = olci_limit
         scale_description = (
             "SSHA uses an independent symmetric 98th-percentile scale; OLCI "
-            "and SWOT model wet delays share the OLCI 98th-percentile scale."
+            "and SWOT AMR wet delays share the OLCI 98th-percentile scale."
         )
 
     figure, axes = plt.subplots(1, 4, figsize=(26.0, 7.2), sharex=True, sharey=True)
@@ -399,17 +420,17 @@ def main() -> None:
         },
         {
             "axis": axes[2],
-            "x": model_x,
-            "y": model_y,
-            "mask": model_mask,
-            "values": model_anomaly,
+            "x": amr_x,
+            "y": amr_y,
+            "mask": amr_mask,
+            "values": amr_anomaly,
             "cmap": cmocean.cm.balance,
-            "norm": model_norm,
+            "norm": amr_norm,
             "title": (
-                "SWOT model wet path delay − median "
-                f"({model_reference:.3f} m)"
+                "SWOT AMR wet path delay − median "
+                f"({amr_reference:.3f} m)"
             ),
-            "unit": "Model wet path-delay anomaly (m)",
+            "unit": "AMR wet path-delay anomaly (m)",
             "size": 4.0,
             "render": "mesh",
         },
@@ -485,7 +506,7 @@ def main() -> None:
     pixel_summary = (
         f"valid pixels: SSHA {int(ssha_mask.sum()):,}, "
         f"Sigma0 {int(sig0_mask.sum()):,}, OLCI delay {int(olci_mask.sum()):,}, "
-        f"SWOT model delay {int(model_mask.sum()):,}; "
+        f"SWOT AMR delay {int(amr_mask.sum()):,}; "
         f"OLCI clear-sky coverage {olci_clear_sky_percent:.1f}%"
     )
     figure.suptitle(
@@ -504,8 +525,9 @@ def main() -> None:
         f"XCAL retained (median {xcal_reference:.3f} m). OLCI delay source: "
         f"{olci_source_variable}; "
         f"{olci_conversion_method}. "
-        "SWOT model delay = −model_wet_tropo_cor. "
-        f"Model side: {swot_side}. "
+        f"SWOT AMR delay = −{args.swot_radiometer_variable}; "
+        "radiometer land-contaminated lines excluded. "
+        f"AMR side: {swot_side}. "
         f"{source_label}",
         ha="center",
         va="bottom",
@@ -523,18 +545,18 @@ def main() -> None:
     print(f"XCAL_ANOMALY_LIMIT_M={xcal_limit:.6f}")
     print(f"XCAL_GOOD_PIXELS={int(np.sum(ssha_mask))}")
     print(f"OLCI_DELAY_REFERENCE_M={olci_reference:.6f}")
-    print(f"SWOT_MODEL_DELAY_REFERENCE_M={model_reference:.6f}")
+    print(f"SWOT_AMR_DELAY_REFERENCE_M={amr_reference:.6f}")
     print(f"SHARED_ANOMALY_LIMIT_M={shared_limit:.6f}")
     print(f"SSHA_ANOMALY_LIMIT_M={ssha_limit:.6f}")
     print(f"OLCI_ANOMALY_LIMIT_M={olci_limit:.6f}")
-    print(f"SWOT_MODEL_ANOMALY_LIMIT_M={model_limit:.6f}")
+    print(f"SWOT_AMR_ANOMALY_LIMIT_M={amr_limit:.6f}")
     print(f"WET_DELAY_PLOT_LIMIT_M={wet_delay_plot_limit:.6f}")
     print(f"SCALE_MODE={args.scale_mode}")
     print(f"SIG0_DB_LIMITS={sig0_low:.6f},{sig0_high:.6f}")
     print(f"OLCI_VALID_PIXELS={int(olci_mask.sum())}")
     print(f"OLCI_CLEAR_SKY_PERCENT={olci_clear_sky_percent:.6f}")
-    print(f"SWOT_MODEL_SIDE={swot_side}")
-    print(f"SWOT_MODEL_VALID_PIXELS={int(model_mask.sum())}")
+    print(f"SWOT_AMR_SIDE={swot_side}")
+    print(f"SWOT_AMR_VALID_PIXELS={int(amr_mask.sum())}")
 
 
 if __name__ == "__main__":

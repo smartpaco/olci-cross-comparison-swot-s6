@@ -35,9 +35,9 @@ def test_olci_coordinates_broadcast_to_delay_grid() -> None:
 
 
 @pytest.mark.filterwarnings("ignore:numpy.ndarray size changed:RuntimeWarning")
-def test_three_panel_comparison_plot(tmp_path: Path) -> None:
+def test_four_panel_comparison_plot(tmp_path: Path) -> None:
     swot_path = tmp_path / "swot_subset.nc"
-    swot_model_path = tmp_path / "swot_expert.nc"
+    swot_expert_path = tmp_path / "swot_expert.nc"
     olci_path = tmp_path / "olci_delay.nc"
     vignette_path = tmp_path / "vignette.gpkg"
     land_path = tmp_path / "land.gpkg"
@@ -47,6 +47,10 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
     longitude = np.tile(np.linspace(-0.3, 0.3, pixels), (lines, 1))
     latitude = np.tile(np.linspace(-0.3, 0.3, lines)[:, None], (1, pixels))
     quality = np.zeros((lines, pixels), dtype=np.uint32)
+    amr_quality = quality.copy()
+    amr_quality[1, :] = np.uint32(1 << 28)
+    radiometer_surface = np.zeros((lines, 2), dtype=np.uint8)
+    radiometer_surface[0, 0] = 2
     xr.Dataset(
         {
             "longitude_signed": (("line", "pixel"), longitude),
@@ -114,7 +118,7 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
         {
             "longitude": (("line", "pixel"), longitude),
             "latitude": (("line", "pixel"), latitude),
-            "model_wet_tropo_cor": (
+            "rad_wet_tropo_cor": (
                 ("line", "pixel"),
                 -0.22
                 + np.linspace(0.03, -0.03, lines * pixels).reshape(
@@ -125,13 +129,17 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
                 ("line", "pixel"),
                 np.tile(np.array([-20_000.0, -10_000.0, 10_000.0]), (lines, 1)),
             ),
-            "ssh_karin_2_qual": (("line", "pixel"), quality),
+            "ssh_karin_qual": (("line", "pixel"), amr_quality),
             "ancillary_surface_classification_flag": (
                 ("line", "pixel"),
                 np.zeros((lines, pixels), dtype=np.uint8),
             ),
+            "rad_surface_type_flag": (
+                ("line", "side"),
+                radiometer_surface,
+            ),
         }
-    ).to_netcdf(swot_model_path)
+    ).to_netcdf(swot_expert_path)
 
     gpd.GeoDataFrame(geometry=[box(-0.5, -0.5, 0.5, 0.5)], crs=4326).to_file(
         vignette_path
@@ -150,8 +158,8 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
             str(swot_path),
             "--olci",
             str(olci_path),
-            "--swot-model",
-            str(swot_model_path),
+            "--swot-expert",
+            str(swot_expert_path),
             "--vignette",
             str(vignette_path),
             "--land",
@@ -173,7 +181,7 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
     assert "XCAL_GOOD_PIXELS=12" in result.stdout
     assert "OLCI_VALID_PIXELS=16" in result.stdout
     assert "OLCI_CLEAR_SKY_PERCENT=100.000000" in result.stdout
-    assert "SWOT_MODEL_SIDE=left" in result.stdout
-    assert "SWOT_MODEL_VALID_PIXELS=8" in result.stdout
+    assert "SWOT_AMR_SIDE=left" in result.stdout
+    assert "SWOT_AMR_VALID_PIXELS=4" in result.stdout
     assert "SHARED_ANOMALY_LIMIT_M=" in result.stdout
     assert "WET_DELAY_PLOT_LIMIT_M=" in result.stdout
