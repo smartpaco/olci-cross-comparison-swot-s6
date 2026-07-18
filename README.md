@@ -330,9 +330,10 @@ SWOT correction variable being analysed.
   --output "data\validation_case\swot_subset.nc"
 ```
 
-The subset contains native SWOT pixels, geolocation, time, corrected SSH,
-SSHA, Sigma0, quality flags, surface classification, and an exact
-`in_vignette` mask. A one-feature GeoPackage and CSV are written beside it.
+The subset contains native SWOT pixels, geolocation, time, `ssh_karin_2`, the
+separate crossover calibration and its quality flag, SSHA, Sigma0, quality
+flags, surface classification, and an exact `in_vignette` mask. A one-feature
+GeoPackage and CSV are written beside it.
 
 ## 6. Plot corrected SWOT SSH, Sigma0, OLCI delay, and SWOT model delay
 
@@ -350,7 +351,7 @@ SSHA, Sigma0, quality flags, surface classification, and an exact
 
 The figure contains four side-by-side panels in this order:
 
-1. corrected SWOT `ssh_karin_2` minus its vignette median;
+1. XCAL-corrected SWOT SSH minus its vignette median;
 2. SWOT `sig0_karin_2` in decibels;
 3. SWOT model wet path delay minus its vignette median;
 4. OLCI `wet_tropo_path_delay` minus its vignette median.
@@ -359,6 +360,20 @@ The Expert variable `model_wet_tropo_cor` is a negative correction in metres.
 The plotting code negates it to obtain a positive equivalent vertical wet path
 delay before removing its median, making its sign convention comparable to the
 OLCI-derived positive delay.
+
+The plotted SSH includes the crossover calibration supplied separately in the
+Unsmoothed product:
+
+```text
+ssh_xcal = ssh_karin_2 + height_cor_xover
+```
+
+The product metadata explicitly instruct users to add `height_cor_xover` to
+`ssh_karin_2`. The subset script therefore retains both
+`height_cor_xover` and `height_cor_xover_qual`, and the plotting script uses
+only pixels whose XCAL quality is `good` (`height_cor_xover_qual == 0`). The
+figure title and console fields `XCAL_REFERENCE_M`,
+`XCAL_ANOMALY_LIMIT_M`, and `XCAL_GOOD_PIXELS` make this processing explicit.
 
 All figure titles, colour bars, annotations, and processing comments are in
 English. Corrected SSH and both wet-delay anomalies are expressed in metres.

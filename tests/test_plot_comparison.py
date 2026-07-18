@@ -60,6 +60,14 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
                 np.linspace(0.08, 0.16, lines * pixels).reshape(lines, pixels),
             ),
             "ssh_karin_2_qual": (("line", "pixel"), quality),
+            "height_cor_xover": (
+                ("line", "pixel"),
+                np.full((lines, pixels), 0.01, dtype=np.float32),
+            ),
+            "height_cor_xover_qual": (
+                ("line", "pixel"),
+                np.zeros((lines, pixels), dtype=np.uint8),
+            ),
             "sig0_karin_2_qual": (("line", "pixel"), quality),
             "in_vignette": (("line", "pixel"), np.ones((lines, pixels), dtype=bool)),
             "ancillary_surface_classification_flag": (
@@ -154,6 +162,9 @@ def test_three_panel_comparison_plot(tmp_path: Path) -> None:
     )
 
     assert output_path.stat().st_size > 20_000
+    assert "SSH_REFERENCE_M=1.210000" in result.stdout
+    assert "XCAL_REFERENCE_M=0.010000" in result.stdout
+    assert "XCAL_GOOD_PIXELS=12" in result.stdout
     assert "OLCI_VALID_PIXELS=16" in result.stdout
     assert "OLCI_CLEAR_SKY_PERCENT=100.000000" in result.stdout
     assert "SWOT_MODEL_SIDE=left" in result.stdout

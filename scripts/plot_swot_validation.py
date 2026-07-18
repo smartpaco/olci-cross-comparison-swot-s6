@@ -167,9 +167,29 @@ def main() -> None:
         swot_x, swot_y = transformer.transform(swot_lon, swot_lat)
         swot_x, swot_y = swot_x / 1000.0, swot_y / 1000.0
 
-        ssh = np.asarray(dataset["ssh_karin_2"].values, dtype=float)
+        missing_xcal = [
+            name
+            for name in ("height_cor_xover", "height_cor_xover_qual")
+            if name not in dataset
+        ]
+        if missing_xcal:
+            argument_parser.error(
+                "SWOT subset is missing XCAL fields: " + ", ".join(missing_xcal)
+            )
+        ssh_native = np.asarray(dataset["ssh_karin_2"].values, dtype=float)
+        height_cor_xover = np.asarray(
+            dataset["height_cor_xover"].values, dtype=float
+        )
+        xcal_quality = np.nan_to_num(
+            dataset["height_cor_xover_qual"].values, nan=255
+        ).astype(np.uint8)
+        xcal_good = np.isfinite(height_cor_xover) & (xcal_quality == 0)
+        ssh = ssh_native + height_cor_xover
         sig0 = np.asarray(dataset["sig0_karin_2"].values, dtype=float)
-        ssh_mask = usable_mask(dataset, "ssh_karin_2", "ssh_karin_2_qual")
+        ssh_mask = (
+            usable_mask(dataset, "ssh_karin_2", "ssh_karin_2_qual")
+            & xcal_good
+        )
         sig0_mask = usable_mask(
             dataset, "sig0_karin_2", "sig0_karin_2_qual"
         ) & (sig0 > 0.0)
@@ -178,6 +198,11 @@ def main() -> None:
 
         ssh_reference = float(np.nanmedian(ssh[ssh_mask]))
         ssh_anomaly = ssh - ssh_reference
+        xcal_reference = float(np.nanmedian(height_cor_xover[ssh_mask]))
+        xcal_anomaly = height_cor_xover - xcal_reference
+        xcal_limit = float(
+            np.nanpercentile(np.abs(xcal_anomaly[ssh_mask]), 98.0)
+        )
         sig0_db = np.full(sig0.shape, np.nan, dtype=float)
         sig0_db[sig0_mask] = 10.0 * np.log10(sig0[sig0_mask])
         sig0_low, sig0_high = np.nanpercentile(sig0_db[sig0_mask], [2.0, 98.0])
@@ -353,7 +378,10 @@ def main() -> None:
             "values": ssh_anomaly,
             "cmap": cmocean.cm.balance,
             "norm": ssh_norm,
-            "title": f"Corrected SWOT SSH − median ({ssh_reference:.3f} m)",
+            "title": (
+                "XCAL-corrected SWOT SSH − median "
+                f"({ssh_reference:.3f} m)"
+            ),
             "unit": "SSH anomaly (m)",
             "size": 4.0,
         },
@@ -472,7 +500,9 @@ def main() -> None:
         f"Native sensor grids; no spatial resampling. {scale_description} "
         "Sigma0 can contain both surface and atmospheric signatures.\n"
         f"Vignette and open-ocean SWOT quality masks applied; {degraded} degraded "
-        f"SSH pixels retained. OLCI delay source: {olci_source_variable}; "
+        "SSH pixels retained. SSH = ssh_karin_2 + height_cor_xover; only good "
+        f"XCAL retained (median {xcal_reference:.3f} m). OLCI delay source: "
+        f"{olci_source_variable}; "
         f"{olci_conversion_method}. "
         "SWOT model delay = −model_wet_tropo_cor. "
         f"Model side: {swot_side}. "
@@ -489,6 +519,9 @@ def main() -> None:
     plt.close(figure)
     print(f"PLOT={output}")
     print(f"SSH_REFERENCE_M={ssh_reference:.6f}")
+    print(f"XCAL_REFERENCE_M={xcal_reference:.6f}")
+    print(f"XCAL_ANOMALY_LIMIT_M={xcal_limit:.6f}")
+    print(f"XCAL_GOOD_PIXELS={int(np.sum(ssh_mask))}")
     print(f"OLCI_DELAY_REFERENCE_M={olci_reference:.6f}")
     print(f"SWOT_MODEL_DELAY_REFERENCE_M={model_reference:.6f}")
     print(f"SHARED_ANOMALY_LIMIT_M={shared_limit:.6f}")
