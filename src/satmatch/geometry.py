@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from pyproj import CRS, Geod, Transformer
 from scipy.spatial import cKDTree
-from shapely import LineString, make_valid
+from shapely import LineString, make_valid, union_all
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform
@@ -225,46 +225,115 @@ def make_vignettes(
                     swot_line.buffer(-options.karin_inner_km * 1000.0, single_sided=True)
                 ),
             }
+            side_geometries: dict[str, BaseGeometry] = {}
+            side_metrics: dict[str, dict] = {}
             for swot_side, karin_fov in karin_fovs.items():
-                overlap = olci_fov.intersection(karin_fov)
-                for part in _polygon_parts(overlap):
-                    if part.area < max(1_000.0, options.min_area_km2 * 1_000_000.0):
-                        continue
-                    centroid = part.centroid
-                    s3_time = _time_at_projection(s3_line, s3_piece["time"], centroid)
-                    swot_time = _time_at_projection(swot_line, swot_piece["time"], centroid)
-                    dt_seconds = abs((s3_time - swot_time).total_seconds())
-                    if dt_seconds > options.max_dt_minutes * 60.0:
-                        continue
-                    ocean_percent = ocean.percentage(part, lon0, lat0, to_local)
-                    if ocean_percent < options.min_ocean_percent:
-                        continue
-                    output_geometry = make_valid(transform(to_wgs84.transform, part))
-                    results.append(
-                        {
-                        "s3_cycle": s3_pass.cycle,
-                        "s3_pass": s3_pass.pass_number,
-                        "s3_revolution": s3_pass.revolution,
-                        "s3_ascending": s3_pass.ascending,
-                        "swot_cycle": swot_pass.cycle,
-                        "swot_pass": swot_pass.pass_number,
-                        "swot_revolution": swot_pass.revolution,
-                        "swot_ascending": swot_pass.ascending,
-                        "s3_time": s3_time,
-                        "swot_time": swot_time,
-                        "dt_minutes": dt_seconds / 60.0,
-                        "swot_side": swot_side,
-                        "along_start_km": along_start / 1000.0,
-                        "along_end_km": along_end / 1000.0,
-                        "area_km2": part.area / 1_000_000.0,
-                        "ocean_percent": ocean_percent,
-                        "ocean_area_km2": part.area * ocean_percent / 100_000_000.0,
-                        "center_lon": float(output_geometry.centroid.x),
-                        "center_lat": float(output_geometry.centroid.y),
-                        "olci_half_swath_km": options.olci_half_swath_km,
-                        "karin_inner_km": options.karin_inner_km,
-                        "karin_outer_km": options.karin_outer_km,
-                            "geometry": output_geometry,
-                        }
-                    )
+                overlap = make_valid(olci_fov.intersection(karin_fov))
+                parts = [
+                    part for part in _polygon_parts(overlap) if part.area >= 1_000.0
+                ]
+                if not parts:
+                    continue
+                side_geometry = make_valid(union_all(parts))
+                centroid = side_geometry.centroid
+                side_s3_time = _time_at_projection(
+                    s3_line, s3_piece["time"], centroid
+                )
+                side_swot_time = _time_at_projection(
+                    swot_line, swot_piece["time"], centroid
+                )
+                side_dt_seconds = abs(
+                    (side_s3_time - side_swot_time).total_seconds()
+                )
+                if side_dt_seconds > options.max_dt_minutes * 60.0:
+                    continue
+                side_ocean_percent = ocean.percentage(
+                    side_geometry, lon0, lat0, to_local
+                )
+                side_geometries[swot_side] = side_geometry
+                side_metrics[swot_side] = {
+                    "area_km2": side_geometry.area / 1_000_000.0,
+                    "ocean_percent": side_ocean_percent,
+                    "ocean_area_km2": (
+                        side_geometry.area
+                        * side_ocean_percent
+                        / 100_000_000.0
+                    ),
+                    "s3_time": side_s3_time,
+                    "swot_time": side_swot_time,
+                    "dt_minutes": side_dt_seconds / 60.0,
+                }
+
+            # A catalogue record is now a complete SWOT scene. Both KaRIn
+            # swaths are kept together so downstream cloud screening can test
+            # them independently without discarding the other swath.
+            if set(side_geometries) != {"left", "right"}:
+                continue
+            scene_geometry = make_valid(union_all(list(side_geometries.values())))
+            if scene_geometry.area < max(
+                1_000.0, options.min_area_km2 * 1_000_000.0
+            ):
+                continue
+            scene_ocean_percent = ocean.percentage(
+                scene_geometry, lon0, lat0, to_local
+            )
+            if scene_ocean_percent < options.min_ocean_percent:
+                continue
+            scene_centroid = scene_geometry.centroid
+            s3_time = _time_at_projection(
+                s3_line, s3_piece["time"], scene_centroid
+            )
+            swot_time = _time_at_projection(
+                swot_line, swot_piece["time"], scene_centroid
+            )
+            dt_seconds = abs((s3_time - swot_time).total_seconds())
+            if dt_seconds > options.max_dt_minutes * 60.0:
+                continue
+
+            output_geometry = make_valid(
+                transform(to_wgs84.transform, scene_geometry)
+            )
+            output_side_geometries = {
+                side: make_valid(transform(to_wgs84.transform, geometry))
+                for side, geometry in side_geometries.items()
+            }
+            results.append(
+                {
+                    "s3_cycle": s3_pass.cycle,
+                    "s3_pass": s3_pass.pass_number,
+                    "s3_revolution": s3_pass.revolution,
+                    "s3_ascending": s3_pass.ascending,
+                    "swot_cycle": swot_pass.cycle,
+                    "swot_pass": swot_pass.pass_number,
+                    "swot_revolution": swot_pass.revolution,
+                    "swot_ascending": swot_pass.ascending,
+                    "s3_time": s3_time,
+                    "swot_time": swot_time,
+                    "dt_minutes": dt_seconds / 60.0,
+                    "swot_side": "both",
+                    "along_start_km": along_start / 1000.0,
+                    "along_end_km": along_end / 1000.0,
+                    "area_km2": scene_geometry.area / 1_000_000.0,
+                    "ocean_percent": scene_ocean_percent,
+                    "ocean_area_km2": (
+                        scene_geometry.area
+                        * scene_ocean_percent
+                        / 100_000_000.0
+                    ),
+                    "left_area_km2": side_metrics["left"]["area_km2"],
+                    "right_area_km2": side_metrics["right"]["area_km2"],
+                    "left_ocean_percent": side_metrics["left"]["ocean_percent"],
+                    "right_ocean_percent": side_metrics["right"]["ocean_percent"],
+                    "left_dt_minutes": side_metrics["left"]["dt_minutes"],
+                    "right_dt_minutes": side_metrics["right"]["dt_minutes"],
+                    "center_lon": float(output_geometry.centroid.x),
+                    "center_lat": float(output_geometry.centroid.y),
+                    "olci_half_swath_km": options.olci_half_swath_km,
+                    "karin_inner_km": options.karin_inner_km,
+                    "karin_outer_km": options.karin_outer_km,
+                    "left_geometry": output_side_geometries["left"],
+                    "right_geometry": output_side_geometries["right"],
+                    "geometry": output_geometry,
+                }
+            )
     return results

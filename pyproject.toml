@@ -19,6 +19,7 @@ dependencies = [
   "netCDF4>=1.7,<2",
   "numpy>=1.26,<3",
   "pandas>=2.2,<3",
+  "pillow>=10,<13",
   "pyogrio>=0.9,<1",
   "pyproj>=3.6,<4",
   "requests>=2.32,<3",

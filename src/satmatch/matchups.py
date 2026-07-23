@@ -68,7 +68,16 @@ def find_matchups(
         print(f"Préfiltre espace-temps: {rejected}/{len(pairs)} paires rejetées")
     if not records:
         return gpd.GeoDataFrame(
-            columns=["s3_time", "swot_time", "dt_minutes", "area_km2", "ocean_percent", "geometry"],
+            columns=[
+                "s3_time",
+                "swot_time",
+                "dt_minutes",
+                "area_km2",
+                "ocean_percent",
+                "left_geometry",
+                "right_geometry",
+                "geometry",
+            ],
             geometry="geometry",
             crs=4326,
         )
