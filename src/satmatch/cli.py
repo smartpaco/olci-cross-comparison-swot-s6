@@ -32,8 +32,18 @@ def resolve_s3_platform(orf_path: str | Path, requested: str | None = None) -> s
     return platform
 
 
-def utc_time(value: str | None):
-    return None if value is None else pd.Timestamp(value, tz="UTC")
+def utc_time(value: str | None, *, end_of_day: bool = False):
+    if value is None:
+        return None
+    timestamp = pd.Timestamp(value)
+    timestamp = (
+        timestamp.tz_localize("UTC")
+        if timestamp.tzinfo is None
+        else timestamp.tz_convert("UTC")
+    )
+    if end_of_day and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        timestamp += pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+    return timestamp
 
 
 def parser() -> argparse.ArgumentParser:
@@ -115,7 +125,7 @@ def main() -> None:
         str(land_mask),
         options,
         start=utc_time(args.start),
-        end=utc_time(args.end),
+        end=utc_time(args.end, end_of_day=True),
         sample_seconds=args.sample_seconds,
         prefilter_seconds=args.prefilter_seconds,
     )
