@@ -381,6 +381,43 @@ The figure contains four side-by-side panels in this order:
 3. SWOT AMR wet path delay minus its vignette median;
 4. OLCI `wet_tropo_path_delay` minus its vignette median.
 
+### Two-swath example: 11 June 2026
+
+The 11 June 2026 matchup contains both KaRIn swaths inside the same OLCI
+granule. The left and right polygons use the same SWOT along-track interval.
+Their time differences are 1.018 and 1.015 minutes, respectively. Strict OLCI
+clear-sky coverage is 99.02% on the left and 90.37% on the right; the
+pixel-weighted coverage of their union is 94.70%.
+
+![Two-swath OLCI/SWOT comparison on 11 June 2026](docs/images/olci-swot-20260611-both-swaths.png)
+
+Extract each side with `subset_swot_validation.py`, then combine the native
+samples without resampling:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\combine_swot_swaths.py `
+  --subset "data\validation_case\swot_subset_left.nc" `
+  --subset "data\validation_case\swot_subset_right.nc" `
+  --output "data\validation_case\swot_subset_both.nc"
+```
+
+For OLCI, repeat `--vignette-id` when running `convert_olci_tcwv.py`; the
+converter crops and masks the union of the two disjoint swath polygons. Repeat
+the same two IDs when plotting from a multi-feature matchup catalogue:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
+  --subset "data\validation_case\swot_subset_both.nc" `
+  --olci "data\validation_case\olci\IWV_with_wet_delay_both.nc" `
+  --swot-expert "data\validation_case\swot\<SWOT Expert granule>.nc" `
+  --vignette "outputs\case_refined.gpkg" `
+  --vignette-id S3A_SWOT_00000069 `
+  --vignette-id S3A_SWOT_00000070 `
+  --land "data\natural_earth\ne_10m_land.zip" `
+  --scale-mode independent `
+  --output "outputs\olci_swot_both_swaths.png"
+```
+
 The Expert variable `rad_wet_tropo_cor` is the wet-troposphere vertical
 correction derived from the Advanced Microwave Radiometer. It is stored as a
 negative correction in metres. The plotting code negates it to obtain a
@@ -421,9 +458,8 @@ rendered as filled native 2 km curvilinear grid cells rather than point markers.
 The underlying AMR observations are made by the two radiometer beams near the
 centres of the KaRIn swaths; `rad_wet_tropo_cor` is the SWOT Level-2 correction
 mapped across that grid. The plotting code does not interpolate it onto the
-250 m KaRIn grid. The sign of
-`cross_track_distance` is used to retain only the same left or right SWOT swath
-recorded in the SSHA/Sigma0 subset.
+250 m KaRIn grid. The sign of `cross_track_distance` is used to retain the
+left, right, or both SWOT swaths recorded in the SSHA/Sigma0 subset.
 
 The SWOT panels use native open-ocean pixels. `bad_not_usable`,
 `bad_outside_of_range`, and `bad_radiometer_corr_missing` pixels are excluded

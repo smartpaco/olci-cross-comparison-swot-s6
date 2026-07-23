@@ -62,12 +62,23 @@ def load_vignette_subset(
     source: xr.Dataset,
     tcwv_name: str,
     vignette_path: str | Path,
+    vignette_ids: list[str] | None = None,
 ) -> xr.Dataset:
-    """Load only the OLCI rows and columns surrounding one vignette."""
+    """Load only the OLCI rows and columns surrounding selected vignettes."""
     vignette = gpd.read_file(vignette_path).to_crs(4326)
-    if len(vignette) != 1:
-        raise ValueError("The vignette file must contain exactly one feature")
-    polygon = vignette.geometry.iloc[0]
+    if vignette_ids:
+        if "vignette_id" not in vignette:
+            raise ValueError("The vignette file has no vignette_id field")
+        vignette = vignette[vignette["vignette_id"].isin(vignette_ids)]
+        missing = sorted(set(vignette_ids) - set(vignette["vignette_id"]))
+        if missing:
+            raise ValueError("Unknown vignette IDs: " + ", ".join(missing))
+    elif len(vignette) != 1:
+        raise ValueError(
+            "The vignette file must contain exactly one feature unless "
+            "--vignette-id is supplied"
+        )
+    polygon = vignette.geometry.union_all()
     min_lon, min_lat, max_lon, max_lat = polygon.bounds
     longitude_name = find_coordinate_variable(
         source, LONGITUDE_CANDIDATES, "longitude"
@@ -111,6 +122,8 @@ def load_vignette_subset(
     )
     subset.attrs.update(source.attrs)
     subset.attrs["spatial_subset"] = Path(vignette_path).name
+    if vignette_ids:
+        subset.attrs["vignette_ids"] = ",".join(vignette_ids)
     return subset
 
 
@@ -136,7 +149,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--output", required=True, help="Output NetCDF file")
     result.add_argument(
         "--vignette",
-        help="Optional one-feature GeoPackage used to crop the OLCI granule before conversion",
+        help="Optional GeoPackage used to crop the OLCI granule before conversion",
+    )
+    result.add_argument(
+        "--vignette-id",
+        action="append",
+        help="Vignette ID to include; repeat to convert the union of both SWOT swaths",
     )
     result.add_argument(
         "--tcwv-variable",
@@ -164,6 +182,8 @@ def parser() -> argparse.ArgumentParser:
 def main() -> None:
     argument_parser = parser()
     args = argument_parser.parse_args()
+    if args.vignette_id and not args.vignette:
+        argument_parser.error("--vignette-id requires --vignette")
     input_path = Path(args.input)
     output_path = Path(args.output)
     if input_path.resolve() == output_path.resolve():
@@ -185,7 +205,9 @@ def main() -> None:
             source = xr.merge(sources, compat="override", combine_attrs="override")
             tcwv_name = find_tcwv_variable(source, args.tcwv_variable)
             dataset = (
-                load_vignette_subset(source, tcwv_name, args.vignette)
+                load_vignette_subset(
+                    source, tcwv_name, args.vignette, args.vignette_id
+                )
                 if args.vignette
                 else source.load()
             )

@@ -109,6 +109,11 @@ def parser() -> argparse.ArgumentParser:
         help="SWOT L2 LR SSH Expert NetCDF containing rad_wet_tropo_cor",
     )
     result.add_argument("--vignette", required=True, help="Vignette GeoPackage")
+    result.add_argument(
+        "--vignette-id",
+        action="append",
+        help="Vignette ID to include; repeat for the left and right swaths",
+    )
     result.add_argument("--land", required=True, help="Land polygon dataset")
     result.add_argument("--output", required=True, help="Output figure path")
     result.add_argument("--title", default="coastal matchup")
@@ -141,9 +146,19 @@ def main() -> None:
     args = argument_parser.parse_args()
 
     vignette = gpd.read_file(args.vignette).to_crs(4326)
-    if len(vignette) != 1:
-        argument_parser.error("The vignette file must contain exactly one feature")
-    polygon = vignette.geometry.iloc[0]
+    if args.vignette_id:
+        if "vignette_id" not in vignette:
+            argument_parser.error("The vignette file has no vignette_id field")
+        vignette = vignette[vignette["vignette_id"].isin(args.vignette_id)].copy()
+        missing = sorted(set(args.vignette_id) - set(vignette["vignette_id"]))
+        if missing:
+            argument_parser.error("Unknown vignette IDs: " + ", ".join(missing))
+    elif len(vignette) != 1:
+        argument_parser.error(
+            "The vignette file must contain exactly one feature unless "
+            "--vignette-id is supplied"
+        )
+    polygon = vignette.geometry.union_all()
     lon0, lat0 = float(polygon.centroid.x), float(polygon.centroid.y)
     local_crs = CRS.from_proj4(
         f"+proj=aeqd +lat_0={lat0:.10f} +lon_0={lon0:.10f} "
@@ -224,9 +239,9 @@ def main() -> None:
         time_start = np.datetime_as_string(dataset["time"].values[0], unit="s")
         time_end = np.datetime_as_string(dataset["time"].values[-1], unit="s")
         swot_side = str(dataset.attrs.get("swot_side", "")).casefold()
-        if swot_side not in {"left", "right"}:
+        if swot_side not in {"left", "right", "both"}:
             argument_parser.error(
-                "The SWOT subset must identify its swot_side as left or right"
+                "The SWOT subset must identify its swot_side as left, right, or both"
             )
         source = dataset.attrs.get("source_product", "")
         marker = re.search(r"_(\d{3})_(\d{3})_", source)
@@ -319,21 +334,31 @@ def main() -> None:
         )
 
     amr_inside = contains_xy(polygon, amr_lon, amr_lat)
-    amr_selected_side = (
-        amr_cross_track < 0.0 if swot_side == "left" else amr_cross_track > 0.0
-    )
+    if swot_side == "left":
+        amr_selected_side = amr_cross_track < 0.0
+    elif swot_side == "right":
+        amr_selected_side = amr_cross_track > 0.0
+    else:
+        amr_selected_side = amr_cross_track != 0.0
     # The two num_sides columns are left and right, respectively. Reject lines
     # for which the selected AMR footprint is invalid because of land
     # contamination; both open-ocean and coastal-ocean retrievals are retained.
-    radiometer_side_index = 0 if swot_side == "left" else 1
-    amr_surface_valid = np.isin(
-        radiometer_surface[:, radiometer_side_index], (0, 1)
-    )
+    left_surface_valid = np.isin(radiometer_surface[:, 0], (0, 1))
+    right_surface_valid = np.isin(radiometer_surface[:, 1], (0, 1))
+    if swot_side == "left":
+        amr_surface_valid = left_surface_valid[:, np.newaxis]
+    elif swot_side == "right":
+        amr_surface_valid = right_surface_valid[:, np.newaxis]
+    else:
+        amr_surface_valid = (
+            ((amr_cross_track < 0.0) & left_surface_valid[:, np.newaxis])
+            | ((amr_cross_track > 0.0) & right_surface_valid[:, np.newaxis])
+        )
     amr_mask = (
         amr_inside
         & amr_selected_side
         & (amr_surface == 0)
-        & amr_surface_valid[:, np.newaxis]
+        & amr_surface_valid
         & np.isfinite(amr_lon)
         & np.isfinite(amr_lat)
         & np.isfinite(amr_correction)
@@ -491,6 +516,19 @@ def main() -> None:
         local_vignette.boundary.plot(
             ax=axis, color="#111111", linewidth=1.0, zorder=3
         )
+        if len(local_vignette) > 1 and "swot_side" in local_vignette:
+            for vignette_row in local_vignette.itertuples():
+                centroid = vignette_row.geometry.centroid
+                axis.text(
+                    centroid.x,
+                    centroid.y,
+                    str(vignette_row.swot_side).upper(),
+                    ha="center",
+                    va="center",
+                    fontsize=8.0,
+                    color="#111111",
+                    zorder=4,
+                )
         colorbar = figure.colorbar(
             artist, ax=axis, orientation="horizontal", pad=0.14, fraction=0.055
         )
@@ -527,7 +565,7 @@ def main() -> None:
         f"{olci_conversion_method}. "
         f"SWOT AMR delay = −{args.swot_radiometer_variable}; "
         "radiometer land-contaminated lines excluded. "
-        f"AMR side: {swot_side}. "
+        f"AMR swath selection: {swot_side}. "
         f"{source_label}",
         ha="center",
         va="bottom",
