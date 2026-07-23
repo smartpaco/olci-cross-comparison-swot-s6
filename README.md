@@ -385,32 +385,49 @@ The figure contains four side-by-side panels in this order:
 
 The 11 June 2026 matchup contains both KaRIn swaths inside the same OLCI
 granule. The left and right polygons use the same SWOT along-track interval.
-Their time differences are 1.018 and 1.015 minutes, respectively. Strict OLCI
-clear-sky coverage is 99.02% on the left and 90.37% on the right; the
-pixel-weighted coverage of their union is 94.70%.
+Their time differences are 1.018 and 1.015 minutes, respectively.
+
+The ORF geometry is used only to discover this candidate. Before extracting or
+plotting the science data, `refine_swot_native_swaths.py` relocates both
+polygons using the native KaRIn longitude, latitude, time, and cross-track
+distance. For this case, the ORF-interpolated ground track was displaced by
+about 40 km. Clipping native pixels with the unrefined polygons therefore made
+each swath look much too narrow. The refined native footprints are
+approximately 50 km along track by 50 km across track.
+
+The refined clear-sky result also differs from the preliminary ORF-polygon
+screen: it is 100.00% on the right swath, 68.32% on the left swath, and 84.23%
+for the pixel-weighted union. This case must consequently not be catalogued as
+a two-swath matchup with more than 90% clear-sky coverage, even though the
+right swath alone is fully clear.
 
 ![Two-swath OLCI/SWOT comparison on 11 June 2026](docs/images/olci-swot-20260611-both-swaths.png)
 
-Extract each side with `subset_swot_validation.py`, then combine the native
-samples without resampling:
+Refine the candidate polygons and extract each native two-dimensional KaRIn
+grid:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\combine_swot_swaths.py `
-  --subset "data\validation_case\swot_subset_left.nc" `
-  --subset "data\validation_case\swot_subset_right.nc" `
-  --output "data\validation_case\swot_subset_both.nc"
+.\.venv\Scripts\python.exe scripts\refine_swot_native_swaths.py `
+  --catalog "outputs\case_refined.gpkg" `
+  --vignette-id S3A_SWOT_00000069 `
+  --vignette-id S3A_SWOT_00000070 `
+  --swot "data\validation_case\swot\<SWOT Unsmoothed granule>.nc" `
+  --output-vignette "outputs\case_native_vignettes.gpkg" `
+  --output-dir "data\validation_case\native"
 ```
 
-For OLCI, repeat `--vignette-id` when running `convert_olci_tcwv.py`; the
-converter crops and masks the union of the two disjoint swath polygons. Repeat
-the same two IDs when plotting from a multi-feature matchup catalogue:
+Use the refined GeoPackage, rather than the ORF polygons, when cropping OLCI.
+Repeat `--vignette-id` to mask the union of the two disjoint native swaths.
+When plotting, repeat `--subset` so each two-dimensional KaRIn grid retains its
+native cell topology:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
-  --subset "data\validation_case\swot_subset_both.nc" `
-  --olci "data\validation_case\olci\IWV_with_wet_delay_both.nc" `
+  --subset "data\validation_case\native\swot_subset_left_native.nc" `
+  --subset "data\validation_case\native\swot_subset_right_native.nc" `
+  --olci "data\validation_case\native\IWV_with_wet_delay_both_native.nc" `
   --swot-expert "data\validation_case\swot\<SWOT Expert granule>.nc" `
-  --vignette "outputs\case_refined.gpkg" `
+  --vignette "outputs\case_native_vignettes.gpkg" `
   --vignette-id S3A_SWOT_00000069 `
   --vignette-id S3A_SWOT_00000070 `
   --land "data\natural_earth\ne_10m_land.zip" `
@@ -455,6 +472,8 @@ Sigma0 always uses an independent percentile-based dB scale. Each instrument
 remains on its native grid; no spatial resampling or resolution matching is
 performed. The AMR correction distributed in the SWOT Expert product is
 rendered as filled native 2 km curvilinear grid cells rather than point markers.
+The negative- and positive-cross-track AMR meshes are rendered separately, so
+Matplotlib cannot join cells across the nadir gap or between the two swaths.
 The underlying AMR observations are made by the two radiometer beams near the
 centres of the KaRIn swaths; `rad_wet_tropo_cor` is the SWOT Level-2 correction
 mapped across that grid. The plotting code does not interpolate it onto the
