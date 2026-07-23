@@ -89,22 +89,50 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = parser().parse_args()
-    catalog = gpd.read_file(args.catalog).to_crs(4326)
+    layers = set(gpd.list_layers(args.catalog)["name"])
+    scene_layer = (
+        "vignettes"
+        if "vignettes" in layers
+        else "intersections"
+        if "intersections" in layers
+        else None
+    )
+    if scene_layer is None:
+        raise SystemExit("The catalogue has no vignettes or intersections layer")
+    catalog = gpd.read_file(args.catalog, layer=scene_layer).to_crs(4326)
     if "vignette_id" not in catalog:
         raise SystemExit("The catalogue has no vignette_id field")
-    selected_rows = catalog[catalog["vignette_id"].isin(args.vignette_id)].copy()
-    missing = sorted(set(args.vignette_id) - set(selected_rows["vignette_id"]))
+    selected_scenes = catalog[catalog["vignette_id"].isin(args.vignette_id)].copy()
+    missing = sorted(set(args.vignette_id) - set(selected_scenes["vignette_id"]))
     if missing:
         raise SystemExit("Unknown vignette IDs: " + ", ".join(missing))
-    if selected_rows["swot_side"].duplicated().any():
-        raise SystemExit("Select at most one catalogue feature per SWOT side")
+    if "swaths" not in layers:
+        raise SystemExit(
+            "The catalogue has no swaths layer; regenerate it with the paired-"
+            "swath intersection search"
+        )
+    swath_catalog = gpd.read_file(args.catalog, layer="swaths").to_crs(4326)
+    selected_swaths = swath_catalog[
+        swath_catalog["vignette_id"].isin(args.vignette_id)
+    ].copy()
+    scene_metadata = selected_scenes.drop(columns="geometry")
+    selected_rows = selected_swaths.merge(
+        scene_metadata,
+        on="vignette_id",
+        how="left",
+        suffixes=("_swath", ""),
+    )
+    side_counts = selected_rows.groupby("vignette_id")["swot_side_swath"].agg(set)
+    if any(sides != {"left", "right"} for sides in side_counts):
+        raise SystemExit("Every selected scene must contain left and right swaths")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     refined_records: list[dict] = []
 
+    multiple_scenes = selected_scenes["vignette_id"].nunique() > 1
     for record in selected_rows.itertuples():
-        side = str(record.swot_side).casefold()
+        side = str(record.swot_side_swath).casefold()
         if side not in {"left", "right"}:
             raise SystemExit(f"Unsupported SWOT side: {side!r}")
         target_time = pd.Timestamp(record.swot_time).to_datetime64()
@@ -205,12 +233,19 @@ def main() -> None:
                 "native_along_track_spacing_m": spacing_m,
             }
         )
-        output_subset = output_dir / f"swot_subset_{side}_native.nc"
+        scene_label = (
+            f"_{record.vignette_id}" if multiple_scenes else ""
+        )
+        output_subset = output_dir / (
+            f"swot_subset{scene_label}_{side}_native.nc"
+        )
         subset.to_netcdf(output_subset)
 
         output_record = selected_rows[
-            selected_rows["vignette_id"] == record.vignette_id
+            (selected_rows["vignette_id"] == record.vignette_id)
+            & (selected_rows["swot_side_swath"] == side)
         ].iloc[0].drop(labels="geometry").to_dict()
+        output_record["swot_side"] = output_record.pop("swot_side_swath")
         output_record.update(
             {
                 "geometry": geometry,
@@ -229,7 +264,7 @@ def main() -> None:
     refined["area_km2"] = areas.to_numpy()
     output_vignette = Path(args.output_vignette)
     output_vignette.parent.mkdir(parents=True, exist_ok=True)
-    refined.to_file(output_vignette, layer="vignettes", driver="GPKG")
+    refined.to_file(output_vignette, layer="swaths", driver="GPKG")
     refined.drop(columns="geometry").to_csv(
         output_vignette.with_suffix(".csv"), index=False
     )

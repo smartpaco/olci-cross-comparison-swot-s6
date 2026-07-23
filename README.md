@@ -1,109 +1,87 @@
-# OLCI cross-comparison with SWOT and S6
+# OLCI cross-comparison with SWOT
 
-Tools for finding spatio-temporal intersections between Sentinel-3 OLCI,
-SWOT KaRIn, and, in a later phase, Sentinel-6 microwave-radiometer
-observations. The project
-uses compact Orbit Revolution Files (ORFs) for acquisition screening, so large
-Level-2 science products are downloaded only after useful matchups have been
-identified.
+Python tools for finding and analysing colocated Sentinel-3 OLCI and SWOT
+observations over the ocean.
 
-## Scientific goals
+The search uses compact Orbit Revolution Files (ORFs). Large Level-2 products
+are downloaded only for scenes that pass the geometric, temporal, ocean, and
+OLCI clear-sky filters.
 
-### Current work: OLCI and SWOT
+## Scientific objective
 
-The first component finds intersections between the Sentinel-3A or Sentinel-3B
-OLCI field of view and the two SWOT KaRIn swaths. The platform is selected for
-each run from the command line. Candidate intersections are constrained in
-space, time, latitude, surface area, ocean fraction, and along-track length.
+The project compares:
 
-For selected matchups, the scientific comparison is visual:
+- OLCI total-column water vapour and its equivalent wet-tropospheric path
+  delay;
+- XCAL-corrected SWOT sea-surface-height anomaly:
+  `ssha_karin_2 + height_cor_xover`;
+- SWOT `sig0_karin_2`;
+- the wet-tropospheric correction derived from the SWOT Advanced Microwave
+  Radiometer.
 
-- map OLCI Total Column Water Vapour (TCWV/COWa) and its equivalent wet path
-  delay at native OLCI resolution;
-- map SWOT KaRIn sea-surface-height anomaly with crossover calibration
-  (`ssha_karin_2 + height_cor_xover`);
-- map SWOT KaRIn normalized radar cross section (`sig0_karin_2`), converted to
-  decibels for display;
-- map the positive equivalent wet path delay derived from the SWOT Advanced
-  Microwave Radiometer (AMR) correction `rad_wet_tropo_cor` in the Expert
-  product;
-- inspect whether coherent structures in OLCI TCWV are still visible as wet
-  tropospheric path-delay residuals in XCAL-corrected SWOT SSHA;
-- interpret Sigma0 jointly with TCWV and SSHA. Sigma0 responds to sea-surface
-  backscatter, but the Ka-band echo is also modified by atmospheric attenuation
-  and precipitation. Small-scale atmospheric structures that are absent from
-  the model-based correction can therefore appear in `sig0_karin_2`; they must
-  not automatically be attributed to the surface. Ice, rain, land
-  contamination, and coastal effects remain alternative explanations.
+The objective is to identify atmospheric structures visible in OLCI water
+vapour and determine whether related signatures remain in corrected SWOT SSHA
+or Sigma0.
 
-No artificial resolution matching is performed. Each sensor is displayed on
-its native grid and only the common geographic vignette is applied.
+Each sensor remains on its native grid. The software does not align or
+artificially resample the sensor resolutions.
 
-### Planned work: OLCI and Sentinel-6
+## Scene definition
 
-The Sentinel-6 component will focus exclusively on the wet-tropospheric
-correction derived from the onboard microwave radiometer, especially its
-high-frequency spatial variability. The objective is to determine whether fine
-atmospheric-water-vapour features, such as moist fronts visible in OLCI TCWV,
-can be detected in or compared with the Sentinel-6 radiometer correction.
+- OLCI is represented by a nominal 1,270 km field of view.
+- SWOT KaRIn consists of two swaths, from 10 to 60 km on each side of nadir.
+- The left and right KaRIn swaths are always stored together as one scene.
+- A complete SWOT scene spans approximately 120 km across track, including the
+  20 km nadir gap.
+- Long intersections are split into segments of at most 50 km along track.
+- The default latitude interval is -66° to +66°.
 
-Sentinel-6 radiometer colocation and scientific analysis are not implemented
-yet.
+The intersection GeoPackage contains:
 
-## Current field-of-view model
+- `vignettes`: one multipolygon per complete left-plus-right SWOT scene;
+- `swaths`: the two component geometries, linked to the scene by
+  `vignette_id`.
 
-- **Sentinel-3A or Sentinel-3B OLCI:** nominal 1,270 km swath, represented as
-  635 km on each side of nadir.
-- **SWOT KaRIn:** two separate swaths, 10 to 60 km from nadir on the left and
-  right sides.
-- **Time separation:** 30 minutes by default.
-- **Vignette length:** at most 50 km along the SWOT ground track.
-- **Minimum vignette area:** 400 km² by default.
-- **Minimum ocean fraction:** 50% by default.
-- **Latitude range:** -66° to +66° by default, excluding the dense polar
-  convergence region.
+Combined and per-swath area, ocean fraction, and time-separation fields are
+stored in the catalogue.
 
-These values are command-line options and can be changed without modifying the
-source code.
+## Selection rule for OLCI clear sky
 
-## Method
-
-1. Read pole/equator/pole events from the mission ORFs.
-2. Interpolate satellite sub-points on the unit sphere using cubic splines.
-3. Select only half-orbits overlapping the requested dates.
-4. Apply a conservative 60-second 3-D KD-tree space-time prefilter to reject
-   clearly separated half-orbit pairs.
-5. Apply a finer simultaneous distance and time test along the SWOT track.
-6. Build OLCI and KaRIn polygons in local azimuthal-equidistant projections.
-7. Split long intersections into along-track vignettes no longer than 50 km.
-8. Calculate area and ocean fraction using Natural Earth land polygons.
-9. Export a GeoPackage and a companion CSV catalogue.
-
-The latitude constraint is applied in the coarse prefilter, the fine candidate
-search, and the final vignette check. On a ten-day test window, this rejected
-743 of 896 temporal half-orbit pairs before detailed geometry.
-
-## Repository layout
+Clear-sky coverage is calculated independently for each SWOT swath from the
+OLCI WQSF flags:
 
 ```text
-orbits/                 Included Sentinel-3A, Sentinel-3B, and SWOT ORFs
-src/satmatch/           ORF parsing, geometry, ocean mask, and matchup engine
-scripts/                Product discovery, download, subsetting, and plotting
-tests/                  Unit tests for ORFs, geometry, and prefilters
-pyproject.toml           Python package and dependency definition
+left_pass  = clear_sky_percent_left  >= threshold
+right_pass = clear_sky_percent_right >= threshold
+scene_selected = left_pass OR right_pass
 ```
 
-Generated `data/` and `outputs/` directories are intentionally ignored by Git.
-API keys, bearer tokens, and credential files must never be committed.
+When either side passes, the complete scene is retained. The other swath is not
+removed, even when it is cloudy.
 
-## Requirements
+The output reports both percentages, both pixel counts, both pass flags, the
+best percentage, and `selected_swaths`.
 
-- Python 3.11 or newer
-- Internet access for the initial Natural Earth mask download
-- NASA Earthdata access for SWOT L2 products
-- EUMETSAT Data Store access and the required Copernicus licence for OLCI TCWV
+## Example: 11 June 2026
+
+The 11 June scene is representative of the cases sought for the 2026
+campaign. It has a time separation of approximately one minute and both KaRIn
+swaths are inside the same OLCI acquisition.
+
+After refinement with native SWOT geolocation, OLCI clear-sky coverage is:
+
+- right swath: 100.00%;
+- left swath: 68.32%;
+- pixel-weighted union: 84.23%.
+
+The complete scene is selected because the right swath passes the 90%
+threshold.
+
+![OLCI and both SWOT swaths on 11 June 2026](docs/images/olci-swot-20260611-both-swaths.png)
 
 ## Installation
+
+Python 3.11 or newer is required.
 
 ### Windows PowerShell
 
@@ -123,398 +101,205 @@ python3.11 -m venv .venv
 
 ## Credentials
 
-Orbit intersection searches require no API credentials. Product discovery and
-download scripts read a local text file supplied with `--credentials`. Keep the
-file outside the repository. It must contain labels for an EUMETSAT key,
-EUMETSAT secret, and NASA Earthdata bearer token, followed by their local
-values. Placeholder example:
+ORF intersection searches require no credentials.
 
-```text
-EUMETSAT
-Key
-<local consumer key>
-Secret
-<local consumer secret>
+OLCI catalogue queries and clear-sky screening require EUMETSAT API
+credentials. SWOT product downloads require a NASA Earthdata bearer token.
+Store these values outside the repository and pass the credential file with
+`--credentials`.
 
-NASA Token
-<local Earthdata bearer token>
-```
+Never commit API keys or tokens.
 
-The repository ignore rules exclude common credential filenames, but users are
-still responsible for checking staged files before every commit.
+## Recommended 2026 search
 
-## 1. Find OLCI–SWOT intersections
+The recommended campaign has three stages:
 
-The ORFs required by this example are included in `orbits/`.
+1. search all S3A/SWOT and S3B/SWOT ORF intersections;
+2. calculate OLCI clear-sky coverage per left/right swath;
+3. download full OLCI and SWOT science products only for the selected scenes.
 
-### Sentinel-3A
+### Important ORF coverage limitation
 
-```powershell
-.\.venv\Scripts\find-s3-swot.exe `
-  --s3-platform S3A `
-  --s3-orf "orbits\S3A_ORF_AXXCNE20260717_075300_20160302_154759_20260801_081654" `
-  --swot-orf "orbits\SWOT_ORF_AXXCNE20260717_103800_20230720_200750_20260801_081502" `
-  --start 2026-06-16 `
-  --end 2026-06-26 `
-  --dt-minutes 30 `
-  --sample-seconds 30 `
-  --prefilter-seconds 60 `
-  --max-along-track-km 50 `
-  --min-area-km2 400 `
-  --min-ocean-percent 50 `
-  --min-latitude -66 `
-  --max-latitude 66 `
-  --land-resolution 50m `
-  --output "outputs\s3a_swot_20260616_20260626.gpkg"
-```
+The ORFs currently included in this repository end on 1 August 2026. They
+cannot yet cover the complete calendar year.
 
-### Sentinel-3B
+Run January-July now. To complete August-December, replace all three ORFs by
+new versions covering at least 31 December 2026 and rerun the missing months.
+Do not extrapolate the current ORFs beyond their last event.
 
-Use the same command with the S3B platform and ORF:
+### Stage 1 — monthly ORF intersection search
+
+Monthly jobs are easier to monitor and restart than one year-long process. The
+following PowerShell loop searches S3A and S3B from January through July 2026:
 
 ```powershell
-.\.venv\Scripts\find-s3-swot.exe `
-  --s3-platform S3B `
-  --s3-orf "orbits\S3B_ORF_AXXCNE20260717_080700_20181123_213005_20260801_080330" `
-  --swot-orf "orbits\SWOT_ORF_AXXCNE20260717_103800_20230720_200750_20260801_081502" `
-  --start 2026-06-16 `
-  --end 2026-06-26 `
-  --dt-minutes 30 `
-  --sample-seconds 30 `
-  --prefilter-seconds 60 `
-  --max-along-track-km 50 `
-  --min-area-km2 400 `
-  --min-ocean-percent 50 `
-  --min-latitude -66 `
-  --max-latitude 66 `
-  --land-resolution 50m `
-  --output "outputs\s3b_swot_20260616_20260626.gpkg"
+$s3Orfs = @{
+  S3A = "orbits\S3A_ORF_AXXCNE20260717_075300_20160302_154759_20260801_081654"
+  S3B = "orbits\S3B_ORF_AXXCNE20260717_080700_20181123_213005_20260801_080330"
+}
+$swotOrf = "orbits\SWOT_ORF_AXXCNE20260717_103800_20230720_200750_20260801_081502"
+$campaignStart = [datetime]"2026-01-01"
+$campaignEnd = [datetime]"2026-08-01"
+
+New-Item -ItemType Directory -Force "outputs\2026_orbit_search" | Out-Null
+
+foreach ($platform in @("S3A", "S3B")) {
+  for ($start = $campaignStart; $start -lt $campaignEnd; $start = $start.AddMonths(1)) {
+    $end = $start.AddMonths(1).AddDays(-1)
+    if ($end -ge $campaignEnd) {
+      $end = $campaignEnd.AddDays(-1)
+    }
+    $label = $start.ToString("yyyy-MM")
+    $startDate = $start.ToString("yyyy-MM-dd")
+    $endDate = $end.ToString("yyyy-MM-dd")
+    $output = "outputs\2026_orbit_search\${platform}_SWOT_${label}.gpkg"
+
+    .\.venv\Scripts\find-s3-swot.exe `
+      --s3-platform $platform `
+      --s3-orf $s3Orfs[$platform] `
+      --swot-orf $swotOrf `
+      --start $startDate `
+      --end $endDate `
+      --dt-minutes 10 `
+      --sample-seconds 30 `
+      --prefilter-seconds 60 `
+      --max-along-track-km 50 `
+      --min-area-km2 2500 `
+      --min-ocean-percent 100 `
+      --min-latitude -66 `
+      --max-latitude 66 `
+      --land-resolution 110m `
+      --output $output
+  }
+}
 ```
 
-`--s3-platform` may be omitted when the ORF filename contains `S3A` or `S3B`.
-The command validates an explicitly selected platform against the filename to
-prevent accidental use of the wrong orbit table. Output vignette identifiers
-are prefixed with `S3A_SWOT_` or `S3B_SWOT_`, and the catalogue contains an
-explicit `s3_platform` field. The former `find-s3a-swot` command remains as a
-backward-compatible alias, but `find-s3-swot` is recommended.
+Recommended first-pass criteria:
 
-The command writes:
+- `dt <= 10 minutes`;
+- paired-scene area at least 2,500 km², approximately equivalent to two
+  50 km-wide swaths over at least 25 km along track;
+- 100% ocean according to the selected Natural Earth screening mask;
+- latitude between -66° and +66°.
 
-- a GeoPackage containing exact vignette polygons;
-- a CSV containing the same attributes without geometry.
+The 30-second orbital sampling and 110m land mask are intended for candidate
+discovery. Native SWOT geolocation and the 10m land mask should be used only
+for final refinement.
 
-Important output fields include acquisition times, absolute time separation,
-cycle/pass/revolution identifiers, KaRIn side, along-track limits, total area,
-ocean area, ocean percentage, centre coordinates, and processing parameters.
-
-For an exploratory search, use a 30-second orbit sampling interval and the 50m
-land mask. Refine a selected acquisition with `--sample-seconds 5` and
-`--land-resolution 10m`. To include polar regions explicitly, set
-`--min-latitude -90 --max-latitude 90`.
-
-Natural Earth land masks are downloaded automatically on first use.
-
-## 2. Search the EUMETSAT TCWV catalogue
-
-The current dedicated OLCI COWa/TCWV collection is
-`EO:EUM:DAT:1121` (`OL_2_TCWVFR`).
-
-For dates before that collection begins, the historical standard OLCI
-water-full-resolution collection `EO:EUM:DAT:0407` (`OL_2_WFR`) provides the
-integrated water-vapour field as `IWV` in `iwv.nc`. Its geolocation and quality
-flags are stored separately in `geo_coordinates.nc` and `wqsf.nc`.
+When updated ORFs covering the entire year are available, set:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\query_eumetsat_products.py `
+$campaignEnd = [datetime]"2027-01-01"
+```
+
+### Stage 2 — clear-sky screening
+
+Pass all monthly S3A and S3B catalogues to one invocation. This allows scenes
+belonging to the same OLCI product to share a single download:
+
+```powershell
+$catalogArguments = foreach (
+  $catalog in Get-ChildItem "outputs\2026_orbit_search\*.gpkg"
+) {
+  "--catalog"
+  $catalog.FullName
+}
+
+.\.venv\Scripts\python.exe scripts\screen_olci_clear_sky.py `
+  @catalogArguments `
   --credentials "C:\path\outside\the\repository\credentials.txt" `
-  --start 2026-06-17T15:47:00+00:00 `
-  --end 2026-06-17T15:54:00+00:00 `
-  --collections EO:EUM:DAT:1121
+  --temporary-directory "data\temporary_olci_screening" `
+  --collection "EO:EUM:DAT:0407" `
+  --min-width-km 25 `
+  --min-length-km 100 `
+  --browse-clear-min 80 `
+  --clear-sky-min 90 `
+  --query-workers 8 `
+  --download-workers 4 `
+  --output "outputs\OLCI_SWOT_2026_selected.gpkg"
 ```
 
-This step queries metadata only. It does not download the science product.
+The output contains the full paired scenes for which at least one swath has
+90% clear-sky coverage. Temporary files are deleted product by product unless
+`--keep-temporary` is supplied.
 
-## 3. Download only selected validation products
+### Is clear-sky screening the slowest stage?
 
-After selecting a vignette, download the matching OLCI TCWV entry:
+Usually yes in wall-clock time, because it requires EUMETSAT catalogue calls
+and network transfers.
+
+For each unique OLCI product, the screener:
+
+1. downloads `browse.jpg` and `tie_geo_coordinates.nc`;
+2. rejects scenes that fail the inexpensive browse-availability test on both
+   swaths;
+3. downloads `wqsf.nc` only when at least one side passes that prefilter;
+4. calculates exact WQSF clear-sky coverage for both swaths;
+5. deletes the temporary files.
+
+The full OLCI science product is not downloaded during screening. The ORF
+intersection calculation can also take several hours over a full year, but it
+is local, restartable by month, and does not depend on an external API.
+
+### Stage 3 — native refinement of a selected scene
+
+Use one paired scene identifier:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\download_validation_products.py `
-  --credentials "C:\path\outside\the\repository\credentials.txt" `
-  --output "data\validation_case" `
-  --source olci `
-  --olci-collection EO:EUM:DAT:1121 `
-  --olci-product "<exact OL_2_TCWVFR product identifier>" `
-  --olci-files TCWV.nc xfdumanifest.xml
+.\.venv\Scripts\python.exe scripts\refine_swot_native_swaths.py `
+  --catalog "outputs\OLCI_SWOT_2026_selected.gpkg" `
+  --vignette-id <paired-scene-id> `
+  --swot "data\validation_case\swot\<SWOT Unsmoothed granule>.nc" `
+  --output-vignette "outputs\selected_scene_native.gpkg" `
+  --output-dir "data\selected_scene"
 ```
 
-Download the matching SWOT L2 LR Unsmoothed granule from NASA Earthdata:
+This writes separate native two-dimensional left and right KaRIn subsets while
+preserving the common scene identifier.
 
-```powershell
-.\.venv\Scripts\python.exe scripts\download_validation_products.py `
-  --credentials "C:\path\outside\the\repository\credentials.txt" `
-  --output "data\validation_case" `
-  --source swot `
-  --swot-start 2026-06-17T15:00:00Z `
-  --swot-end 2026-06-17T15:40:00Z `
-  --swot-pass 537
-```
+## OLCI wet-path-delay conversion
 
-The SWOT AMR wet-troposphere correction is stored in the matching Expert
-product. Download that much smaller granule with the same cycle, pass, and time
-window:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\download_validation_products.py `
-  --credentials "C:\path\outside\the\repository\credentials.txt" `
-  --output "data\validation_case" `
-  --source swot `
-  --swot-collection SWOT_L2_LR_SSH_EXPERT_D `
-  --swot-start 2026-06-17T14:40:00Z `
-  --swot-end 2026-06-17T15:40:00Z `
-  --swot-pass 537
-```
-
-The download script skips existing non-empty files and writes via `.part`
-files before atomically renaming completed downloads.
-
-## 4. Convert OLCI TCWV to wet tropospheric path delay
-
-`IWV_W` is the integrated water-vapour column in kg m⁻². The conversion
-implemented here produces the positive, one-way zenith wet propagation delay
-in metres:
-
-```text
-ZWD = (A + B / Tm) * TCWV
-A = -2.95077e-5 m / (kg m-2)
-B =  1.73276 m K / (kg m-2)
-```
-
-`Tm` is the water-vapour-weighted mean atmospheric temperature. This is
-Eq. A15 of [Bennartz et al. (2017)](https://doi.org/10.5194/amt-10-1387-2017).
-The OLCI `IWV_W` field and its kg m⁻² units are documented in the
-[Copernicus Sentinel-3 OLCI L2 data description](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Data/S3OLCIL2.html).
-
-Run the conversion after downloading the selected `TCWV.nc` file:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\convert_olci_tcwv.py `
-  --input "data\validation_case\olci\TCWV.nc" `
-  --output "data\validation_case\olci\TCWV_with_wet_delay.nc" `
-  --vignette "data\validation_case\swot_subset.gpkg" `
-  --mean-temperature-k 270
-```
-
-For a historical `OL_2_WFR` product, pass the companion geolocation and quality
-files explicitly:
+After downloading the selected OLCI product:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\convert_olci_tcwv.py `
   --input "data\validation_case\olci\iwv.nc" `
   --geolocation "data\validation_case\olci\geo_coordinates.nc" `
   --quality-file "data\validation_case\olci\wqsf.nc" `
-  --output "data\validation_case\olci\IWV_with_wet_delay.nc" `
-  --vignette "data\validation_case\vignette.gpkg" `
-  --mean-temperature-k 270
+  --vignette "outputs\selected_scene_native.gpkg" `
+  --vignette-id <paired-scene-id> `
+  --mean-temperature-k 270 `
+  --output "data\selected_scene\IWV_with_wet_delay.nc"
 ```
 
-The variable name is detected automatically among `IWV_W`, `IWV`, `TCWV`,
-`tcwv`, and common case variants when `--tcwv-variable` is omitted. With
-`--vignette`, the
-converter first locates the relevant OLCI rows and columns and loads only TCWV,
-longitude, latitude, uncertainty, and quality information. This avoids loading
-the full 4091 x 4865 product into memory. Pixels with `qi = 0` are excluded.
-For `OL_2_WFR`, the converter also excludes `INVALID`, `LAND`, `CLOUD`,
-`CLOUD_AMBIGUOUS`, `CLOUD_MARGIN`, `SNOW_ICE`, and `WV_FAIL` pixels from the
-`WQSF` bit field.
-The compact output contains a float32 `wet_tropo_path_delay` variable in metres
-and an exact `in_vignette` mask. Existing scale factors and fill values are
-decoded by xarray before conversion.
+The conversion produces positive one-way zenith wet path delay in metres. It
+uses the Bennartz et al. formulation and a constant water-vapour-weighted mean
+temperature unless `--tm-variable` is supplied.
 
-With the default `Tm = 270 K`, the conversion factor is
-6.388 mm of wet delay per kg m⁻² of TCWV, close to the commonly quoted
-6.4 mm. This constant-temperature mode is intended for initial pattern and
-amplitude comparisons. For a more accurate absolute amplitude, first add a
-pixel-wise water-vapour-weighted `Tm` field from a meteorological profile, then
-use `--tm-variable <variable-name>`. A fixed `Tm` changes the multiplicative
-amplitude but does not create new small-scale spatial patterns.
-
-The generated delay is positive excess path length, not a signed SSH
-correction. Compare demeaned or detrended amplitudes in metres. If an excess
-wet delay is left uncorrected in the radar range, its expected SSH residual has
-the opposite sign; the exact sign comparison must follow the convention of the
-SWOT correction variable being analysed.
-
-## 5. Extract the exact SWOT vignette
-
-```powershell
-.\.venv\Scripts\python.exe scripts\subset_swot_validation.py `
-  --catalog "outputs\case_refined.gpkg" `
-  --vignette-id S3A_SWOT_00000001 `
-  --swot "data\validation_case\swot\<SWOT granule>.nc" `
-  --output "data\validation_case\swot_subset.nc"
-```
-
-The subset contains native SWOT pixels, geolocation, time, `ssh_karin_2`, the
-separate crossover calibration and its quality flag, SSHA, Sigma0, quality
-flags, surface classification, and an exact `in_vignette` mask. A one-feature
-GeoPackage and CSV are written beside it.
-
-## 6. Plot XCAL-corrected SWOT SSHA, Sigma0, OLCI delay, and SWOT AMR delay
+## Four-panel comparison
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
-  --subset "data\validation_case\swot_subset.nc" `
-  --olci "data\validation_case\olci\TCWV_with_wet_delay.nc" `
+  --subset "data\selected_scene\swot_subset_left_native.nc" `
+  --subset "data\selected_scene\swot_subset_right_native.nc" `
+  --olci "data\selected_scene\IWV_with_wet_delay.nc" `
   --swot-expert "data\validation_case\swot\<SWOT Expert granule>.nc" `
-  --vignette "data\validation_case\swot_subset.gpkg" `
-  --land "data\natural_earth\ne_10m_land.zip" `
-  --title "coastal validation case" `
-  --scale-mode independent `
-  --output "outputs\olci_swot_four_panel_patterns.png"
-```
-
-The figure contains four side-by-side panels in this order:
-
-1. XCAL-corrected SWOT SSHA minus its vignette median;
-2. SWOT `sig0_karin_2` in decibels;
-3. SWOT AMR wet path delay minus its vignette median;
-4. OLCI `wet_tropo_path_delay` minus its vignette median.
-
-### Two-swath example: 11 June 2026
-
-The 11 June 2026 matchup contains both KaRIn swaths inside the same OLCI
-granule. The left and right polygons use the same SWOT along-track interval.
-Their time differences are 1.018 and 1.015 minutes, respectively.
-
-The ORF geometry is used only to discover this candidate. Before extracting or
-plotting the science data, `refine_swot_native_swaths.py` relocates both
-polygons using the native KaRIn longitude, latitude, time, and cross-track
-distance. For this case, the ORF-interpolated ground track was displaced by
-about 40 km. Clipping native pixels with the unrefined polygons therefore made
-each swath look much too narrow. The refined native footprints are
-approximately 50 km along track by 50 km across track.
-
-The refined clear-sky result also differs from the preliminary ORF-polygon
-screen: it is 100.00% on the right swath, 68.32% on the left swath, and 84.23%
-for the pixel-weighted union. This case must consequently not be catalogued as
-a two-swath matchup with more than 90% clear-sky coverage, even though the
-right swath alone is fully clear.
-
-![Two-swath OLCI/SWOT comparison on 11 June 2026](docs/images/olci-swot-20260611-both-swaths.png)
-
-Refine the candidate polygons and extract each native two-dimensional KaRIn
-grid:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\refine_swot_native_swaths.py `
-  --catalog "outputs\case_refined.gpkg" `
-  --vignette-id S3A_SWOT_00000069 `
-  --vignette-id S3A_SWOT_00000070 `
-  --swot "data\validation_case\swot\<SWOT Unsmoothed granule>.nc" `
-  --output-vignette "outputs\case_native_vignettes.gpkg" `
-  --output-dir "data\validation_case\native"
-```
-
-Use the refined GeoPackage, rather than the ORF polygons, when cropping OLCI.
-Repeat `--vignette-id` to mask the union of the two disjoint native swaths.
-When plotting, repeat `--subset` so each two-dimensional KaRIn grid retains its
-native cell topology:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\plot_swot_validation.py `
-  --subset "data\validation_case\native\swot_subset_left_native.nc" `
-  --subset "data\validation_case\native\swot_subset_right_native.nc" `
-  --olci "data\validation_case\native\IWV_with_wet_delay_both_native.nc" `
-  --swot-expert "data\validation_case\swot\<SWOT Expert granule>.nc" `
-  --vignette "outputs\case_native_vignettes.gpkg" `
-  --vignette-id S3A_SWOT_00000069 `
-  --vignette-id S3A_SWOT_00000070 `
+  --vignette "outputs\selected_scene_native.gpkg" `
+  --vignette-id <paired-scene-id> `
   --land "data\natural_earth\ne_10m_land.zip" `
   --scale-mode independent `
-  --output "outputs\olci_swot_both_swaths.png"
+  --output "outputs\selected_scene_comparison.png"
 ```
 
-The Expert variable `rad_wet_tropo_cor` is the wet-troposphere vertical
-correction derived from the Advanced Microwave Radiometer. It is stored as a
-negative correction in metres. The plotting code negates it to obtain a
-positive equivalent vertical wet path delay before removing its median, making
-its sign convention comparable to the OLCI-derived positive delay. The map is
-therefore labelled as an AMR wet path delay, not as a weather-model correction.
+The panels are:
 
-The plotted SSHA includes the crossover calibration supplied separately in the
-Unsmoothed product:
+1. XCAL-corrected SWOT SSHA anomaly;
+2. SWOT Sigma0;
+3. SWOT AMR wet-path-delay anomaly;
+4. OLCI-derived wet-path-delay anomaly.
 
-```text
-ssha_xcal = ssha_karin_2 + height_cor_xover
-```
-
-The product metadata explicitly instruct users to add `height_cor_xover` to
-`ssha_karin_2`. The base SSHA already removes the CNES/CLS mean sea surface,
-solid-Earth tide, ocean tides, internal tide, pole tide, and dynamic
-atmospheric correction as documented in the product metadata. The subset
-script therefore retains both
-`height_cor_xover` and `height_cor_xover_qual`, and the plotting script uses
-only pixels whose XCAL quality is `good` (`height_cor_xover_qual == 0`). The
-figure title and console fields `XCAL_REFERENCE_M`,
-`XCAL_ANOMALY_LIMIT_M`, and `XCAL_GOOD_PIXELS` make this processing explicit.
-
-All figure titles, colour bars, annotations, and processing comments are in
-English. XCAL-corrected SSHA and both wet-delay anomalies are expressed in metres.
-`--scale-mode shared` applies one symmetric colour scale to all three metre
-panels for direct visual amplitude comparison. `--scale-mode independent`
-applies an independent symmetric 98th-percentile scale to SSHA, while OLCI and
-the SWOT AMR wet-delay panels both use the OLCI 98th-percentile limit. This
-keeps the two wet-delay amplitudes directly comparable while still revealing
-their spatial patterns. The console field `WET_DELAY_PLOT_LIMIT_M` records the
-limit used by both wet-delay colour bars.
-Sigma0 always uses an independent percentile-based dB scale. Each instrument
-remains on its native grid; no spatial resampling or resolution matching is
-performed. The AMR correction distributed in the SWOT Expert product is
-rendered as filled native 2 km curvilinear grid cells rather than point markers.
-The negative- and positive-cross-track AMR meshes are rendered separately, so
-Matplotlib cannot join cells across the nadir gap or between the two swaths.
-The underlying AMR observations are made by the two radiometer beams near the
-centres of the KaRIn swaths; `rad_wet_tropo_cor` is the SWOT Level-2 correction
-mapped across that grid. The plotting code does not interpolate it onto the
-250 m KaRIn grid. The sign of `cross_track_distance` is used to retain the
-left, right, or both SWOT swaths recorded in the SSHA/Sigma0 subset.
-
-The SWOT panels use native open-ocean pixels. `bad_not_usable`,
-`bad_outside_of_range`, and `bad_radiometer_corr_missing` pixels are excluded
-from the AMR panel. Lines whose selected AMR footprint is marked as invalid by
-land contamination are also excluded. The OLCI panel uses finite wet-delay
-pixels over ocean whose centres fall inside the exact vignette polygon; land,
-invalid, or cloudy TCWV pixels remain absent. OLCI longitude and latitude are
-automatically detected for common 1-D or 2-D coordinate layouts. Non-standard
-names can be provided with `--olci-longitude-variable` and
-`--olci-latitude-variable`.
-
-The figure header and the console output report OLCI clear-sky data coverage.
-It is calculated as the percentage of ocean pixel centres inside the vignette
-that have a finite converted OLCI wet-delay value. The machine-readable console
-field is `OLCI_CLEAR_SKY_PERCENT`.
-
-The plotted `sig0_karin_2` uses a model-based atmospheric attenuation
-correction. Rain, cloud liquid water, and water-vapour-related attenuation can
-leave atmospheric signatures when that model does not resolve the observed
-feature. See the
-[SWOT L2 LR SSH product description](https://www.aviso.altimetry.fr/fileadmin/documents/data/tools/D-56407_SWOT_Product_Description_L2_LR_SSH_20220902_RevA.pdf)
-for the distinction between `sig0_karin` and `sig0_karin_2`.
-
-## OLCI clear-sky coverage
-
-The TCWV product is generated for cloud-free daytime pixels. Once TCWV access
-is available, clear-sky coverage should be reported at least as:
-
-```text
-valid TCWV pixels inside the vignette / OLCI pixels inside the vignette
-```
-
-and separately over ocean. The converted output preserves an exact
-`in_vignette` mask and masks the relevant TCWV/IWV quality flags, so this
-percentage can be computed without resampling the sensor grid. A product browse
-image remains useful only for rapid qualitative screening.
+The left and right AMR meshes are rendered separately to avoid false cells
+across the nadir gap.
 
 ## Testing
 
@@ -522,37 +307,14 @@ image remains useful only for rapid qualitative screening.
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The tests cover ORF parsing and interpolation, tangent geometry handling,
-space-time prefilter behaviour, polar-latitude rejection, the TCWV-to-wet-delay
-physics, memory-efficient NetCDF conversion, OLCI coordinate broadcasting, and
-generation of the four-panel comparison figure.
+## Repository layout
 
-## Current limitations
+```text
+orbits/                 Sentinel-3A, Sentinel-3B, and SWOT ORFs
+src/satmatch/           ORF parsing, geometry, ocean mask, matchup engine
+scripts/                Screening, download, conversion, refinement, plotting
+tests/                  Unit and workflow tests
+```
 
-- Sentinel-3A and Sentinel-3B use the same nominal OLCI field-of-view model;
-  platform-specific differences beyond their ORFs are not represented.
-- The OLCI swath is currently a symmetric nominal buffer rather than an exact
-  instrument edge model.
-- ORF interpolation is designed for acquisition screening, not precise pixel
-  geolocation.
-- Cloud-free OLCI coverage is not available from ORFs and is determined from
-  the downloaded selected product's TCWV/IWV validity and quality flags.
-- The default TCWV-to-wet-delay conversion uses a constant `Tm = 270 K`.
-  Pixel-wise meteorological profiles are required for the best absolute
-  accuracy and for a spatially varying conversion factor.
-- Sentinel-6 radiometer colocation, product download, analysis, and comparison
-  workflows remain on the roadmap.
-
-## Roadmap
-
-1. Quantify spatial correlations and scale-dependent coherence.
-2. Add Sentinel-6 radiometer colocation and wet-troposphere analysis.
-3. Add pixel-wise meteorological `Tm` generation and propagated uncertainty
-   estimates for the wet-delay conversion.
-
-## Data policy and attribution
-
-The repository contains software and the user-supplied ORFs only. It does not
-redistribute NASA or EUMETSAT Level-2 products. Users must obtain data through
-the official services and comply with the corresponding licences and
-attribution requirements.
+Generated `data/` and `outputs/` directories are ignored by Git. The
+repository does not redistribute EUMETSAT or NASA Level-2 products.

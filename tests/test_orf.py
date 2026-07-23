@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from shapely import LineString
 
-from satmatch.cli import resolve_s3_platform
+from satmatch.cli import resolve_s3_platform, utc_time
 from satmatch.geometry import _polygon_parts
 from satmatch.orf import OrbitInterpolator, pass_windows, read_orf
 
@@ -54,3 +54,11 @@ def test_explicit_sentinel3_platform_for_generic_orf_name() -> None:
 def test_reject_platform_orf_mismatch() -> None:
     with pytest.raises(ValueError, match="does not match"):
         resolve_s3_platform("S3A_ORF_example", "S3B")
+
+
+def test_utc_time_accepts_aware_timestamp_and_inclusive_date_end() -> None:
+    aware = utc_time("2026-06-11T15:15:00+02:00")
+    inclusive_end = utc_time("2026-06-30", end_of_day=True)
+
+    assert aware == pd.Timestamp("2026-06-11T13:15:00Z")
+    assert inclusive_end == pd.Timestamp("2026-06-30T23:59:59.999999999Z")

@@ -4,6 +4,7 @@ import argparse
 import re
 from pathlib import Path
 
+import geopandas as gpd
 import pandas as pd
 
 from .geometry import GeometryOptions
@@ -31,8 +32,18 @@ def resolve_s3_platform(orf_path: str | Path, requested: str | None = None) -> s
     return platform
 
 
-def utc_time(value: str | None):
-    return None if value is None else pd.Timestamp(value, tz="UTC")
+def utc_time(value: str | None, *, end_of_day: bool = False):
+    if value is None:
+        return None
+    timestamp = pd.Timestamp(value)
+    timestamp = (
+        timestamp.tz_localize("UTC")
+        if timestamp.tzinfo is None
+        else timestamp.tz_convert("UTC")
+    )
+    if end_of_day and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        timestamp += pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+    return timestamp
 
 
 def parser() -> argparse.ArgumentParser:
@@ -114,7 +125,7 @@ def main() -> None:
         str(land_mask),
         options,
         start=utc_time(args.start),
-        end=utc_time(args.end),
+        end=utc_time(args.end, end_of_day=True),
         sample_seconds=args.sample_seconds,
         prefilter_seconds=args.prefilter_seconds,
     )
@@ -133,9 +144,44 @@ def main() -> None:
         "vignette_id",
         [f"{s3_platform}_SWOT_{idx:08d}" for idx in range(1, len(matches) + 1)],
     )
-    matches.to_file(output, layer="vignettes", driver="GPKG")
-    matches.drop(columns="geometry").to_csv(output.with_suffix(".csv"), index=False)
-    print(f"{len(matches)} vignettes écrites dans {output} et {output.with_suffix('.csv')}")
+    swath_records: list[dict] = []
+    for _, row in matches.iterrows():
+        for side in ("left", "right"):
+            swath_records.append(
+                {
+                    "vignette_id": row["vignette_id"],
+                    "s3_platform": s3_platform,
+                    "swot_side": side,
+                    "area_km2": row[f"{side}_area_km2"],
+                    "ocean_percent": row[f"{side}_ocean_percent"],
+                    "dt_minutes": row[f"{side}_dt_minutes"],
+                    "geometry": row[f"{side}_geometry"],
+                }
+            )
+    swaths = gpd.GeoDataFrame(
+        swath_records,
+        columns=[
+            "vignette_id",
+            "s3_platform",
+            "swot_side",
+            "area_km2",
+            "ocean_percent",
+            "dt_minutes",
+            "geometry",
+        ],
+        geometry="geometry",
+        crs=4326,
+    )
+    public_matches = matches.drop(columns=["left_geometry", "right_geometry"])
+    public_matches.to_file(output, layer="vignettes", driver="GPKG")
+    swaths.to_file(output, layer="swaths", driver="GPKG", mode="a")
+    public_matches.drop(columns="geometry").to_csv(
+        output.with_suffix(".csv"), index=False
+    )
+    print(
+        f"{len(public_matches)} SWOT scenes written to {output} with "
+        f"{len(swaths)} side geometries and {output.with_suffix('.csv')}"
+    )
 
 
 if __name__ == "__main__":
